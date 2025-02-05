@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "877582915989",
+    "project_id": "reallitter",
+    "storage_bucket": "reallitter.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:877582915989:android:4b0fadcf66dbb6e0dbbe9c",
+        "android_client_info": {
+          "package_name": "com.litterwarden"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAWjJPVn3pzyYhgmbry1HS-g_xrQftZbcQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
