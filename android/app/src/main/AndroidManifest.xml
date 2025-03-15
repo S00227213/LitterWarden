@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.litterwarden">
 
-    <!-- Required Permissions for Internet & Location -->
+    <!-- Required Permissions for Internet, Location & Storage -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -16,6 +16,13 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:requiredForAllUsers="true" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" android:requiredForAllUsers="true" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+
+    <!-- Permissions to read (and optionally write) external storage -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <!-- Optional: if you need to write files -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <!-- For Android 13+ (targetSdkVersion 33) consider using this new permission for reading images -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
 
     <application
         android:name=".MainApplication"

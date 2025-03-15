@@ -13,99 +13,101 @@ import {
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useFocusEffect } from '@react-navigation/native';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from '../firebaseConfig'; // Adjust your path as needed
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { auth } from '../firebaseConfig'; 
 
 const Dashboard = ({ navigation }) => {
-  const SERVER_URL = 'http://192.168.1.74:5000'; // Replace with your backend server's IP if needed
+  // Server URL 
+  const SERVER_URL = 'http://192.168.1.74:5000';
+  
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [userEmail, setUserEmail] = useState('');
-  const [selectedReport, setSelectedReport] = useState(null); // For viewing marker
+  const [selectedReport, setSelectedReport] = useState(null);
 
   // Pagination state
   const itemsPerPage = 12;
   const [currentPage, setCurrentPage] = useState(0);
 
-  // Listen for authentication state changes to get the user email
+  // Monitor authentication changes to update the user email
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
-        console.log("[Dashboard] Authenticated user:", user.email);
+        console.log("Authenticated user:", user.email);
         setUserEmail(user.email);
       } else {
-        console.log("[Dashboard] No user is authenticated");
+        console.log("No authenticated user");
         setUserEmail('');
       }
     });
     return () => unsubscribe();
   }, []);
 
-  // Log when userEmail is updated
+  // Log the current userEmail for debugging
   useEffect(() => {
-    console.log("[Dashboard] Current userEmail:", userEmail);
+    console.log("Current userEmail:", userEmail);
   }, [userEmail]);
 
-  // Function to fetch reports for the signed-in user's email.
+  // Fetch reports for the current user from the server
   const fetchUserReports = async () => {
     if (!userEmail) {
-      console.log("[Dashboard] fetchUserReports skipped because userEmail is empty.");
+      console.log("fetchUserReports skipped: userEmail is empty.");
       setLoading(false);
       return;
     }
-    console.log("[Dashboard] Starting fetchUserReports for email:", userEmail);
+    console.log("Fetching reports for email:", userEmail);
     try {
       const url = `${SERVER_URL}/reports?email=${encodeURIComponent(userEmail)}`;
-      console.log("[Dashboard] Fetch URL:", url);
+      console.log("Fetch URL:", url);
       const response = await fetch(url);
-      console.log("[Dashboard] HTTP response status:", response.status);
+      console.log("HTTP response status:", response.status);
       const data = await response.json();
-      console.log("[Dashboard] Fetched reports data:", data);
+      console.log("Fetched reports data:", data);
       setReports(data);
-      setCurrentPage(0); // Reset to first page on new fetch
+      setCurrentPage(0);
     } catch (error) {
-      console.error("[Dashboard] Error fetching reports:", error);
+      console.error("Error fetching reports:", error);
       Alert.alert('Error', 'Unable to fetch reports.');
     } finally {
       setLoading(false);
-      console.log("[Dashboard] Finished fetching reports. Loading set to false.");
+      console.log("Finished fetching reports.");
     }
   };
 
-  // Function to delete a report
+  // Delete a report by its ID
   const deleteReport = async (reportId) => {
     try {
       const url = `${SERVER_URL}/report/${reportId}`;
-      console.log("[Dashboard] Delete URL:", url);
+      console.log("Delete URL:", url);
       const response = await fetch(url, { method: 'DELETE' });
       if (response.ok) {
-        console.log("[Dashboard] Report deleted successfully:", reportId);
+        console.log("Report deleted:", reportId);
         setReports(prev => prev.filter(report => report._id !== reportId));
       } else {
         Alert.alert('Error', 'Failed to delete report.');
       }
     } catch (error) {
-      console.error("[Dashboard] Error deleting report:", error);
+      console.error("Error deleting report:", error);
       Alert.alert('Error', 'Could not delete report.');
     }
   };
 
-  // Re-fetch reports every time the Dashboard screen is focused
+  // Refetch reports when the Dashboard screen gains focus
   useFocusEffect(
     React.useCallback(() => {
-      console.log("[Dashboard] useFocusEffect triggered: Dashboard focused.");
+      console.log("Dashboard focused. Refetching reports.");
       setLoading(true);
       fetchUserReports();
     }, [userEmail])
   );
 
-  // Compute the reports to show on the current page
+  // Determine which reports to display based on pagination
   const currentReports = reports.slice(currentPage * itemsPerPage, (currentPage + 1) * itemsPerPage);
   const totalPages = Math.ceil(reports.length / itemsPerPage);
 
-  // Render each report item in a grid cell
+  // Render a single report card in a grid cell
   const renderReport = ({ item }) => {
-    console.log("[Dashboard] Rendering report item with _id:", item._id);
+    console.log("Rendering report with _id:", item._id);
     return (
       <View style={styles.reportCard}>
         <View style={styles.reportTextContainer}>
@@ -162,9 +164,9 @@ const Dashboard = ({ navigation }) => {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1E1E1E" />
 
-      {/* Top Section */}
+      {/* Header Section */}
       <View style={styles.topSection}>
-        {/* Navbar */}
+        {/* Navigation Bar */}
         <View style={styles.navbar}>
           <Text style={styles.navbarTitle}>Dashboard</Text>
           <View style={styles.navbarRight}>
@@ -172,8 +174,16 @@ const Dashboard = ({ navigation }) => {
             <TouchableOpacity 
               style={styles.logoutButton} 
               onPress={() => {
-                console.log("[Dashboard] Logout pressed. Navigating to HomeScreen.");
-                navigation.navigate('Home');
+                signOut(auth)
+                  .then(() => {
+                    navigation.reset({
+                      index: 0,
+                      routes: [{ name: 'Home' }],
+                    });
+                  })
+                  .catch((error) => {
+                    console.error("Error signing out: ", error);
+                  });
               }}
             >
               <Text style={styles.logoutText}>Logout</Text>
@@ -196,7 +206,7 @@ const Dashboard = ({ navigation }) => {
           <Text style={styles.noReportsText}>No reports available for this user.</Text>
         )}
 
-        {/* Pagination Navigation */}
+        {/* Pagination Controls */}
         {reports.length > itemsPerPage && (
           <View style={styles.pagination}>
             <TouchableOpacity
@@ -220,7 +230,7 @@ const Dashboard = ({ navigation }) => {
         )}
       </View>
 
-      {/* Bottom Section - Report Litter Now Button */}
+      {/* Footer Section – Navigate to the map to report litter */}
       <TouchableOpacity
         style={styles.reportButton}
         onPress={() => navigation.navigate('Map')}
@@ -228,7 +238,7 @@ const Dashboard = ({ navigation }) => {
         <Text style={styles.reportButtonText}>Report Litter Now</Text>
       </TouchableOpacity>
 
-      {/* Modal to Display Map Marker */}
+      {/* Modal to display the map marker for a selected report */}
       {selectedReport && (
         <Modal
           animationType="slide"
