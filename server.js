@@ -2,29 +2,26 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-// No need to require node-fetch; using built-in fetch in Node.js v18+
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
-// **🔹 Connect to MongoDB**
 const connectDB = async () => {
   try {
-    // Removed the deprecated useNewUrlParser option
     await mongoose.connect(process.env.MONGO_URI);
-    console.log('✅ MongoDB Connected');
+    console.log('MongoDB Connected');
   } catch (error) {
-    console.error('❌ MongoDB Connection Error:', error);
+    console.error('MongoDB Connection Error:', error);
     process.exit(1);
   }
 };
 connectDB();
 
-// **🔹 Load Google Maps API Key**
+// ** Load Google Maps API Key **
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
-// **🔹 Mongoose Schema & Model**
+// ** Mongoose Schema & Model **
 const reportSchema = new mongoose.Schema({
   latitude: { type: Number, required: true },
   longitude: { type: Number, required: true },
@@ -38,7 +35,7 @@ const reportSchema = new mongoose.Schema({
 
 const Report = mongoose.model('Report', reportSchema, 'reports');
 
-// **🔹 Get Address from Coordinates using Google Maps API**
+// ** Get Address from Coordinates using Google Maps API **
 const getAddressFromCoords = async (latitude, longitude) => {
   try {
     const response = await fetch(
@@ -48,8 +45,8 @@ const getAddressFromCoords = async (latitude, longitude) => {
 
     if (data.status === 'OK' && data.results.length > 0) {
       let town = 'Unknown',
-        county = 'Unknown',
-        country = 'Unknown';
+          county = 'Unknown',
+          country = 'Unknown';
 
       data.results[0].address_components.forEach((component) => {
         if (component.types.includes('locality')) town = component.long_name;
@@ -60,12 +57,12 @@ const getAddressFromCoords = async (latitude, longitude) => {
       return { town, county, country };
     }
   } catch (error) {
-    console.error('❌ Error fetching address:', error);
+    console.error('Error fetching address:', error);
   }
   return { town: 'Unknown', county: 'Unknown', country: 'Unknown' };
 };
 
-// **🔹 POST /report - Save a New Litter Report**
+// ** POST /report - Save a New Litter Report **
 app.post('/report', async (req, res) => {
   try {
     let { latitude, longitude, town, county, country, priority, email } = req.body;
@@ -81,20 +78,20 @@ app.post('/report', async (req, res) => {
       country = locationData.country;
     }
 
-    console.log('📍 Incoming Report:', { latitude, longitude, town, county, country, priority, email });
+    console.log('Incoming Report:', { latitude, longitude, town, county, country, priority, email });
 
     // Create the new report document in MongoDB
     const newReport = await Report.create({ latitude, longitude, town, county, country, priority, email });
 
     // Return the newly created document with all its fields
-    res.status(201).json({ message: '✅ Report saved successfully!', report: newReport });
+    res.status(201).json({ message: 'Report saved successfully!', report: newReport });
   } catch (error) {
-    console.error('❌ Error saving report:', error);
+    console.error('Error saving report:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// **🔹 GET /reports - Fetch Reports with Optional Email Filtering & Pagination**
+// ** GET /reports - Fetch Reports with Optional Email Filtering & Pagination **
 app.get('/reports', async (req, res) => {
   try {
     const { email, page = 1, limit = 20 } = req.query;
@@ -107,12 +104,12 @@ app.get('/reports', async (req, res) => {
 
     res.json(reports);
   } catch (error) {
-    console.error('❌ Error fetching reports:', error);
+    console.error('Error fetching reports:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// **🔹 DELETE /report/:id - Delete a Report by ID**
+// ** DELETE /report/:id - Delete a Report by ID **
 app.delete('/report/:id', async (req, res) => {
   try {
     const reportId = req.params.id;
@@ -120,13 +117,13 @@ app.delete('/report/:id', async (req, res) => {
 
     if (!deletedReport) return res.status(404).json({ error: 'Report not found' });
 
-    res.json({ message: '✅ Report deleted successfully!', report: deletedReport });
+    res.json({ message: 'Report deleted successfully!', report: deletedReport });
   } catch (error) {
-    console.error(' Error deleting report:', error);
+    console.error('Error deleting report:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// **🔹 Start the Server**
+// ** Start the Server **
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
