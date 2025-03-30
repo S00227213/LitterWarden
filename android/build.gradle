@@ -10,10 +10,10 @@ buildscript {
     repositories {
         google()
         mavenCentral()
-        maven { url "https://maven.transistorsoft.com" } // ✅ Add this to fix `react-native-background-geolocation`
+        maven { url "https://maven.transistorsoft.com" }
     }
     dependencies {
-        classpath("com.android.tools.build:gradle:8.2.0") // ✅ Ensure latest Gradle version
+        classpath("com.android.tools.build:gradle:8.2.0") 
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
     }
@@ -23,7 +23,7 @@ allprojects {
     repositories {
         google()
         mavenCentral()
-        maven { url "https://maven.transistorsoft.com" } // ✅ Required for `react-native-background-geolocation`
+        maven { url "https://maven.transistorsoft.com" } 
     }
 }
 

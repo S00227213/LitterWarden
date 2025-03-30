@@ -1,4 +1,3 @@
-// C:\LitterWarden\screens\HomeScreen.js
 
 import React, { useEffect, useState, useRef } from 'react';
 import { 
