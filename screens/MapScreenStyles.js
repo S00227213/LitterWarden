@@ -1,9 +1,10 @@
-import { StyleSheet, Dimensions } from 'react-native';
+// MapScreenStyles.js
+import { StyleSheet, Dimensions, Platform } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
 export default StyleSheet.create({
-  // Layout
+
   container: {
     flex: 1,
     flexDirection: 'column',
@@ -21,9 +22,11 @@ export default StyleSheet.create({
     paddingHorizontal: 15,
     paddingVertical: 5,
     justifyContent: 'space-around',
+    borderTopWidth: 1,
+    borderTopColor: '#333',
   },
 
-  // Components
+
   header: {
     fontSize: 28,
     fontWeight: '700',
@@ -32,18 +35,20 @@ export default StyleSheet.create({
     marginVertical: 15,
   },
   errorContainer: {
-    backgroundColor: 'rgba(255, 0, 0, 0.2)',
-    padding: 10,
-    borderRadius: 8,
-    marginHorizontal: 15,
+    backgroundColor: 'rgba(255, 69, 0, 0.3)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginHorizontal: 10,
     marginTop: 5,
+    borderRadius: 8,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   errorText: {
-    color: 'red',
+    color: '#FF4500',
     fontSize: 14,
+    fontWeight: '500',
     flex: 1,
     textAlign: 'left',
   },
@@ -51,7 +56,7 @@ export default StyleSheet.create({
     paddingLeft: 10,
   },
   errorCloseButtonText: {
-    color: 'red',
+    color: '#FF4500',
     fontSize: 18,
     fontWeight: 'bold',
   },
@@ -59,11 +64,15 @@ export default StyleSheet.create({
     position: 'absolute',
     bottom: 15,
     right: 15,
-    backgroundColor: 'rgba(30,144,255,0.9)',
+    backgroundColor: 'rgba(30,144,255, 0.85)',
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 20,
     elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
     zIndex: 5,
   },
   refreshButtonText: {
@@ -74,8 +83,10 @@ export default StyleSheet.create({
   deviceStatusContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 5,
-    borderRadius: 20,
+
+
   },
   deviceStatusText: {
     fontSize: 14,
@@ -84,10 +95,10 @@ export default StyleSheet.create({
     marginRight: 8,
   },
   rescanButton: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     backgroundColor: '#444',
-    borderRadius: 4,
+    borderRadius: 15,
   },
   rescanButtonText: {
     color: '#eee',
@@ -101,33 +112,33 @@ export default StyleSheet.create({
   },
   extraButton: {
     paddingVertical: 10,
-    paddingHorizontal: 15,
+    paddingHorizontal: 12,
     backgroundColor: '#4b4b4b',
     borderRadius: 25,
     marginBottom: 8,
     minWidth: width / 4.8,
     alignItems: 'center',
+    marginHorizontal: 2,
   },
   manualButton: {
-    // if needed
+
   },
   extraButtonText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     textAlign: 'center',
   },
   emailContainer: {
     paddingVertical: 5,
-    borderRadius: 20,
     alignItems: 'center',
   },
   emailText: {
-    color: '#ccc',
+    color: '#aaa',
     fontSize: 12,
   },
 
-  // Miscellaneous
+
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -137,24 +148,26 @@ export default StyleSheet.create({
   loadingText: {
     fontSize: 18,
     color: '#fff',
-    marginBottom: 10,
+    marginBottom: 15,
   },
   retryButton: {
     backgroundColor: '#1e90ff',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 25,
     borderRadius: 8,
-    marginTop: 15,
+    marginTop: 20,
   },
   retryButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
   },
+
+
   modalOverlay: {
     position: 'absolute',
     top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 10,
@@ -163,7 +176,8 @@ export default StyleSheet.create({
     backgroundColor: '#2c2c2c',
     borderRadius: 14,
     paddingHorizontal: 15,
-    paddingVertical: 6,
+    paddingTop: 10,
+    paddingBottom: 10,
     width: '95%',
     maxWidth: 480,
     maxHeight: '90%',
@@ -173,60 +187,82 @@ export default StyleSheet.create({
     shadowOpacity: 0.6,
     shadowRadius: 8,
     elevation: 8,
+    position: 'relative',
+  },
+  modalTopCloseButton: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 10 : 8,
+    right: 10,
+    padding: 5,
+    zIndex: 10,
+
+
+  },
+  modalTopCloseButtonText: {
+    color: '#ccc',
+    fontSize: 22,
+    fontWeight: 'bold',
+    lineHeight: 24,
   },
   modalHeader: {
-    fontSize: 19,
+    fontSize: 20,
     fontWeight: '700',
-    marginBottom: 6,
+    marginTop: 20,
+    marginBottom: 12,
     color: '#eaeaea',
     textAlign: 'center',
   },
   modalText: {
-    fontSize: 13,
-    marginBottom: 4,
+    fontSize: 14,
+    marginBottom: 6,
     textAlign: 'center',
     color: '#b5b5b5',
-    lineHeight: 17,
+    lineHeight: 19,
   },
   modalTextHighlight: {
     color: '#fff',
     fontWeight: '600',
   },
-  priorityTextLow: { color: '#ffff00' },
-  priorityTextMedium: { color: '#ffa500' },
-  priorityTextHigh: { color: '#ff4500' },
+
+  priorityTextLow: { color: '#ffeb3b' },
+  priorityTextMedium: { color: '#ff9800' },
+  priorityTextHigh: { color: '#f44336' },
   paginationText: {
-    fontSize: 10,
+    fontSize: 11,
     color: '#999',
-    marginBottom: 5,
+    marginBottom: 8,
+    fontWeight: '500',
   },
   evidenceSection: {
     width: '100%',
     alignItems: 'center',
-    marginVertical: 4,
+    marginVertical: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#444',
   },
   evidenceButton: {
-    backgroundColor: '#0077ff',
-    paddingVertical: 7,
-    paddingHorizontal: 16,
-    borderRadius: 18,
-    marginVertical: 4,
+    backgroundColor: '#007AFF',
+    paddingVertical: 9,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    marginVertical: 8,
   },
   evidenceButtonText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '500',
   },
   imageFrame: {
     borderWidth: 1,
     borderColor: '#555',
     borderRadius: 10,
-    padding: 3,
+    padding: 4,
     backgroundColor: '#1f1f1f',
-    marginBottom: 6,
-    marginTop: 3,
-    width: '85%',
-    aspectRatio: 1,
+    marginBottom: 10,
+    marginTop: 5,
+    width: '90%',
+    aspectRatio: 4/3,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
@@ -237,35 +273,62 @@ export default StyleSheet.create({
     height: '100%',
   },
   noPhotoContainer: {
-    width: '85%',
-    aspectRatio: 1,
+    width: '90%',
+    aspectRatio: 4/3,
     backgroundColor: '#333',
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 6,
-    marginTop: 3,
+    marginBottom: 10,
+    marginTop: 5,
   },
   noPhotoText: {
     color: '#888',
-    fontSize: 14,
+    fontSize: 16,
+    fontStyle: 'italic',
+  },
+
+  modalButton: {
+    borderRadius: 8,
+    marginVertical: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 38,
   },
   submitButton: { backgroundColor: '#4CAF50' },
   changeButton: { backgroundColor: '#ff9800' },
   removeButton: { backgroundColor: '#f44336' },
+  modalButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+
+  modalFooterContainer: {
+    width: '100%',
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#444',
+    alignItems: 'center',
+  },
   modalNavContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
-    marginTop: 6,
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 5,
   },
   navButton: {
     backgroundColor: '#555',
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-    borderRadius: 18,
+    paddingVertical: 9,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    minWidth: 70,
+    alignItems: 'center',
   },
   navButtonDisabled: {
     backgroundColor: '#333',
@@ -278,35 +341,17 @@ export default StyleSheet.create({
   },
   cleanButton: {
     backgroundColor: '#4CAF50',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 7,
-  },
-  closeButton: {
-    backgroundColor: '#f44336',
-    marginTop: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 30,
-    borderRadius: 18,
-  },
-  modalButton: {
-    borderRadius: 7,
-    marginVertical: 3,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    alignItems: 'center',
-  },
-  modalButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    marginHorizontal: 10,
   },
 
-  // Priority Modal
+
+
   priorityModalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -316,45 +361,63 @@ export default StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 25,
     paddingHorizontal: 20,
-    width: '80%',
+    width: '85%',
     maxWidth: 350,
     alignItems: 'stretch',
     elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
   },
   priorityModalHeader: {
     fontSize: 20,
     fontWeight: '600',
-    marginBottom: 20,
+    marginBottom: 25,
     color: '#eaeaea',
     textAlign: 'center',
   },
   priorityButton: {
-    paddingVertical: 14,
+    paddingVertical: 15,
     borderRadius: 8,
-    marginBottom: 12,
+    marginBottom: 15,
     alignItems: 'center',
   },
-  lowPriority: { backgroundColor: '#ffc107' },
+
+  lowPriority: { backgroundColor: '#ffeb3b' },
   mediumPriority: { backgroundColor: '#ff9800' },
   highPriority: { backgroundColor: '#f44336' },
-  cancelButton: { backgroundColor: '#607d8b', marginTop: 5 },
+  cancelButton: { backgroundColor: '#6c757d', marginTop: 10 },
   priorityButtonText: {
     color: '#000',
     fontSize: 16,
     fontWeight: '600',
   },
 
-  // Marker Styles
-  customMarker: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+
+  clusterContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.4,
+    shadowRadius: 2,
+    elevation: 4,
   },
-  markerImage: {
-    width: 30,
-    height: 30,
-    resizeMode: 'contain',
+  clusterText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 'bold',
+    textAlign: 'center',
   },
+
+
+  customMarker: {  },
+  markerImage: {  },
 });

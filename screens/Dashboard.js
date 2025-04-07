@@ -23,9 +23,10 @@ if (!REACT_APP_SERVER_URL) {
   console.warn("Server URL missing.");
 }
 
+
 const Dashboard = ({ navigation }) => {
   const SERVER_URL =
-    REACT_APP_SERVER_URL || 'https://3cf3-86-40-74-78.ngrok-free.app';
+    REACT_APP_SERVER_URL || 'https://f547-86-40-74-78.ngrok-free.app';
 
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -70,7 +71,7 @@ const Dashboard = ({ navigation }) => {
     console.log("[Dashboard] Fetching reports for:", userEmail);
     setLoading(true);
     try {
-      const url = `${SERVER_URL}/reports?email=${encodeURIComponent(userEmail)}`;
+      const url = `${SERVER_URL}/reports?email=${encodeURIComponent(userEmail)}&includeClean=true`;
       console.log("[Dashboard] Fetch URL:", url);
       const response = await fetch(url);
       console.log("[Dashboard] HTTP status:", response.status);
@@ -83,7 +84,7 @@ const Dashboard = ({ navigation }) => {
       setCurrentPage(0);
     } catch (error) {
       console.error("[Dashboard] Fetch error:", error);
-      Alert.alert('Error', `Unable to fetch reports. ${error.message}`);
+      Alert.alert('Error', `Unable to fetch your reports. ${error.message}`);
       setReports([]);
     } finally {
       setLoading(false);
@@ -99,7 +100,7 @@ const Dashboard = ({ navigation }) => {
     }
     Alert.alert(
       "Delete Report",
-      "Are you sure you want to delete this report?",
+      "Are you sure you want to permanently delete this report?",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -110,6 +111,7 @@ const Dashboard = ({ navigation }) => {
               const url = `${SERVER_URL}/report/${reportId}`;
               console.log("[Dashboard] Delete URL:", url);
               const response = await fetch(url, { method: 'DELETE' });
+
               if (response.ok) {
                 setReports((prev) => {
                   const updated = prev.filter((r) => r._id !== reportId);
@@ -121,15 +123,15 @@ const Dashboard = ({ navigation }) => {
                   }
                   return updated;
                 });
-                Alert.alert('Success', 'Report deleted.');
+                Alert.alert('Success', 'Report deleted successfully.');
               } else {
                 const errorData = await response.text();
                 console.error("[Dashboard] Delete failed:", response.status, errorData);
-                Alert.alert('Error', `Delete failed. Status ${response.status}.`);
+                Alert.alert('Error', `Delete failed. Status ${response.status}. ${errorData}`);
               }
             } catch (error) {
               console.error("[Dashboard] Delete error:", error);
-              Alert.alert('Error', 'Could not delete report.');
+              Alert.alert('Error', `Could not delete report. ${error.message}`);
             } finally {
               setLoading(false);
             }
@@ -208,6 +210,12 @@ const Dashboard = ({ navigation }) => {
               <Text style={styles.label}>Priority: </Text>
               <Text style={styles.value}>{item.priority || 'N/A'}</Text>
             </Text>
+             {item.isClean && (
+                 <Text style={styles.row} numberOfLines={1} ellipsizeMode="tail">
+                   <Text style={[styles.label, { color: '#4CAF50' }]}>Status: </Text>
+                   <Text style={[styles.value, { color: '#4CAF50' }]}>Cleaned</Text>
+                 </Text>
+             )}
             <Text style={styles.row} numberOfLines={1} ellipsizeMode="tail">
               <Text style={styles.label}>Reported: </Text>
               <Text style={styles.value}>
@@ -231,6 +239,7 @@ const Dashboard = ({ navigation }) => {
                   pitchEnabled={false}
                   rotateEnabled={false}
                   toolbarEnabled={false}
+                  liteMode={true}
                 >
                   <Marker coordinate={{ latitude: lat, longitude: lon }} />
                 </MapView>
@@ -245,12 +254,14 @@ const Dashboard = ({ navigation }) => {
           </View>
         </View>
         <View style={styles.reportButtons}>
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: '#FF5252' }]}
-            onPress={() => deleteReport(item._id)}
-          >
-            <Text style={styles.actionButtonText}>Delete</Text>
-          </TouchableOpacity>
+          {!item.isClean && (
+             <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#FF5252' }]}
+                onPress={() => deleteReport(item._id)}
+             >
+                <Text style={styles.actionButtonText}>Delete</Text>
+             </TouchableOpacity>
+           )}
         </View>
       </View>
     );
@@ -258,9 +269,11 @@ const Dashboard = ({ navigation }) => {
 
   const renderModalMap = () => {
     if (!selectedReport) return null;
+
     const lat = parseFloat(selectedReport.latitude);
     const lon = parseFloat(selectedReport.longitude);
     const validCoordinates = isValidLatLng(lat, lon);
+
     return (
       <Modal
         animationType="slide"
@@ -270,7 +283,7 @@ const Dashboard = ({ navigation }) => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
-            <Text style={styles.modalHeader}>Location Marker</Text>
+            <Text style={styles.modalHeader}>Report Location</Text>
             {validCoordinates && REACT_APP_GOOGLE_MAPS_API_KEY ? (
               <MapView
                 provider={PROVIDER_GOOGLE}
@@ -282,6 +295,8 @@ const Dashboard = ({ navigation }) => {
                   latitudeDelta: 0.005,
                   longitudeDelta: 0.005,
                 }}
+                showsUserLocation={true}
+                showsMyLocationButton={true}
               >
                 <Marker
                   coordinate={{ latitude: lat, longitude: lon }}
@@ -291,7 +306,7 @@ const Dashboard = ({ navigation }) => {
               </MapView>
             ) : (
               <Text style={styles.noLocationTextLarge}>
-                {!validCoordinates ? 'No valid location data.' : 'Map disabled (API Key)'}
+                {!validCoordinates ? 'No valid location data available for this report.' : 'Map disabled due to missing API Key.'}
               </Text>
             )}
             <TouchableOpacity
@@ -309,6 +324,7 @@ const Dashboard = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1E1E1E" />
+
       <View style={styles.topSection}>
         <View style={styles.navbar}>
           <Text style={styles.navbarTitle}>Dashboard</Text>
@@ -327,7 +343,9 @@ const Dashboard = ({ navigation }) => {
             </TouchableOpacity>
           </View>
         </View>
+
         <Text style={styles.header}>Your Location Reports</Text>
+
         {loading ? (
           <ActivityIndicator size="large" color="#1E90FF" style={styles.loader} />
         ) : reports.length > 0 ? (
@@ -345,9 +363,10 @@ const Dashboard = ({ navigation }) => {
           />
         ) : (
           <Text style={styles.noReportsText}>
-            {userEmail ? 'You have no reports yet.' : 'Please log in to see your reports.'}
+            {userEmail ? 'You have not submitted any reports yet.' : 'Please log in to view your reports.'}
           </Text>
         )}
+
         {totalPages > 1 && (
           <View style={styles.pagination}>
             <TouchableOpacity
@@ -360,9 +379,11 @@ const Dashboard = ({ navigation }) => {
             >
               <Text style={styles.pageButtonText}>Previous</Text>
             </TouchableOpacity>
+
             <Text style={styles.pageInfo}>
               Page {currentPage + 1} of {totalPages}
             </Text>
+
             <TouchableOpacity
               onPress={() =>
                 setCurrentPage((prev) => Math.min(prev + 1, totalPages - 1))
@@ -378,12 +399,23 @@ const Dashboard = ({ navigation }) => {
           </View>
         )}
       </View>
+
+
+       <TouchableOpacity
+         style={[styles.reportButton, { marginBottom: 10, backgroundColor: '#03DAC6' }]}
+         onPress={() => navigation.navigate('CleanerTasks')}
+       >
+         <Text style={[styles.reportButtonText, { color: '#121212' }]}>View Cleanup Tasks</Text>
+       </TouchableOpacity>
+
+
       <TouchableOpacity
         style={styles.reportButton}
         onPress={() => navigation.navigate('Map')}
       >
         <Text style={styles.reportButtonText}>Report Litter Now</Text>
       </TouchableOpacity>
+
       {renderModalMap()}
     </View>
   );

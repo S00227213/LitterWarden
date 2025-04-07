@@ -22,7 +22,6 @@ import { BleManager } from 'react-native-ble-plx';
 import base64 from 'react-native-base64';
 import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
 
-// Env variables 
 import {
   REACT_APP_AZURE_CV_KEY,
   REACT_APP_AZURE_CV_ENDPOINT,
@@ -31,13 +30,15 @@ import {
 
 import styles from './MapScreenStyles';
 
-// Constants
+
 const SERVICE_UUID = '62f3511c-bbaa-416c-af55-d51cddce0e9f';
 const CHARACTERISTIC_UUID_TX = 'b1a3511c-bbaa-416c-af55-d51cddce0e9f';
 const AZURE_CV_KEY = REACT_APP_AZURE_CV_KEY;
 const AZURE_CV_ENDPOINT = REACT_APP_AZURE_CV_ENDPOINT;
 const GOOGLE_MAPS_API_KEY = REACT_APP_GOOGLE_MAPS_API_KEY;
-const SERVER_URL = 'https://3cf3-86-40-74-78.ngrok-free.app';
+const SERVER_URL = 'https://f547-86-40-74-78.ngrok-free.app';
+const CLUSTER_THRESHOLD = 5;
+const CLUSTER_RADIUS_METERS = 150;
 
 console.log("Server URL:", SERVER_URL);
 if (!SERVER_URL) {
@@ -49,10 +50,26 @@ if (!GOOGLE_MAPS_API_KEY) {
   Alert.alert("Config Error", "Google Maps API Key missing. Check .env.");
 }
 
+
+function haversineDistance(coords1, coords2) {
+  const R = 6371e3;
+  const φ1 = coords1.latitude * Math.PI / 180;
+  const φ2 = coords2.latitude * Math.PI / 180;
+  const Δφ = (coords2.latitude - coords1.latitude) * Math.PI / 180;
+  const Δλ = (coords2.longitude - coords1.longitude) * Math.PI / 180;
+
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+}
+
 const MapScreen = ({ navigation }) => {
   const { width } = Dimensions.get('window');
 
-  // Marker images 
+
   const markerImages = useMemo(() => ({
     low: require('../assets/low-warning.png'),
     medium: require('../assets/medium-warning.png'),
@@ -60,7 +77,7 @@ const MapScreen = ({ navigation }) => {
     clean: require('../assets/clean.png'),
   }), []);
 
-  // State variables
+
   const [location, setLocation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reports, setReports] = useState([]);
@@ -73,8 +90,9 @@ const MapScreen = ({ navigation }) => {
   const [lastError, setLastError] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [isDeletingImage, setIsDeletingImage] = useState(false);
+  const [expandedClusterId, setExpandedClusterId] = useState(null);
 
-  // Refs
+
   const bleManager = useRef(new BleManager()).current;
   const [esp32Device, setEsp32Device] = useState(null);
   const [esp32Connected, setEsp32Connected] = useState(false);
@@ -83,15 +101,144 @@ const MapScreen = ({ navigation }) => {
   const animatedScale = useRef(new Animated.Value(0.9)).current;
   const animatedOpacity = useRef(new Animated.Value(0)).current;
 
-  // Memoized markers for the user
+
   const userMarkers = useMemo(() => {
     if (!userEmail) return [];
+
     return reports
       .filter(report => report.email && report.email.toLowerCase() === userEmail.toLowerCase())
       .sort((a, b) => new Date(b.reportedAt) - new Date(a.reportedAt));
   }, [reports, userEmail]);
 
-  /* Auth Listener */
+
+  const processedMarkers = useMemo(() => {
+    const markers = [...userMarkers];
+    const clusters = [];
+    const singles = [];
+    let clusterIdCounter = 0;
+
+    const processedIndices = new Set();
+
+    for (let i = 0; i < markers.length; i++) {
+      if (processedIndices.has(i)) continue;
+
+      const currentPoint = markers[i];
+      const clusterGroup = [i];
+      processedIndices.add(i);
+
+
+      for (let j = i + 1; j < markers.length; j++) {
+        if (processedIndices.has(j)) continue;
+
+        const neighborPoint = markers[j];
+        const distance = haversineDistance(
+          { latitude: currentPoint.latitude, longitude: currentPoint.longitude },
+          { latitude: neighborPoint.latitude, longitude: neighborPoint.longitude }
+        );
+
+        if (distance <= CLUSTER_RADIUS_METERS) {
+          clusterGroup.push(j);
+
+        }
+      }
+
+
+      if (clusterGroup.length >= CLUSTER_THRESHOLD) {
+
+        const actualClusterMarkers = [];
+        let sumLat = 0;
+        let sumLng = 0;
+        clusterGroup.forEach(index => {
+            processedIndices.add(index);
+            actualClusterMarkers.push(markers[index]);
+            sumLat += markers[index].latitude;
+            sumLng += markers[index].longitude;
+        });
+
+
+        if (actualClusterMarkers.length >= CLUSTER_THRESHOLD) {
+            clusters.push({
+              id: `cluster-${clusterIdCounter++}`,
+              center: {
+                latitude: sumLat / actualClusterMarkers.length,
+                longitude: sumLng / actualClusterMarkers.length,
+              },
+              count: actualClusterMarkers.length,
+              markers: actualClusterMarkers,
+            });
+        } else {
+
+             clusterGroup.forEach(index => {
+
+                 if (!singles.some(s => s._id === markers[index]._id) && !clusters.some(c => c.markers.some(m => m._id === markers[index]._id)) ) {
+                      singles.push(markers[index]);
+                 }
+             });
+        }
+      } else {
+
+        singles.push(currentPoint);
+
+      }
+    }
+
+
+    const finalSingles = singles.filter(s => !clusters.some(c => c.markers.some(m => m._id === s._id)));
+
+    return { clusters, singles: finalSingles };
+  }, [userMarkers]);
+
+
+
+  const handleClusterPress = useCallback((clusterId) => {
+
+    const cluster = processedMarkers.clusters.find(c => c.id === clusterId);
+    if (!cluster) return;
+
+    if (expandedClusterId === clusterId) {
+
+      setExpandedClusterId(null);
+    } else {
+
+      setExpandedClusterId(clusterId);
+
+      if (mapRef.current && cluster.markers.length > 0) {
+        mapRef.current.fitToCoordinates(
+          cluster.markers.map(m => ({ latitude: m.latitude, longitude: m.longitude })),
+          {
+            edgePadding: { top: 100, right: 50, bottom: 50, left: 50 },
+            animated: true,
+          }
+        );
+      }
+    }
+  }, [processedMarkers.clusters, expandedClusterId]);
+
+
+  const handleMarkerPress = useCallback((report) => {
+    const markerIndex = userMarkers.findIndex((um) => um._id === report._id);
+    if (markerIndex !== -1) {
+      setSelectedReport(report);
+      setSelectedMarkerIndex(markerIndex);
+      setShowPreviewModal(true);
+      setExpandedClusterId(null);
+    } else {
+      console.warn("Marker not found in original userMarkers list.");
+
+       const reportFromState = reports.find(r => r._id === report._id);
+       if(reportFromState) {
+           setSelectedReport(reportFromState);
+           setSelectedMarkerIndex(-1);
+           setShowPreviewModal(true);
+           setExpandedClusterId(null);
+       } else {
+           console.error("Report details could not be found.");
+       }
+    }
+  }, [userMarkers, reports]);
+
+
+
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       if (user) {
@@ -105,12 +252,13 @@ const MapScreen = ({ navigation }) => {
         await AsyncStorage.removeItem('userEmail');
         setReports([]);
         setLastError('');
+        setExpandedClusterId(null);
       }
     });
     return () => unsubscribe();
   }, []);
 
-  /* Fetch Reports */
+
   const fetchReports = useCallback(async () => {
     if (!userEmail) return;
     if (!SERVER_URL) {
@@ -121,6 +269,7 @@ const MapScreen = ({ navigation }) => {
     setLastError('');
     console.log(`Fetching reports for ${userEmail}...`);
     try {
+
       const url = `${SERVER_URL}/reports?email=${encodeURIComponent(userEmail)}&includeClean=false`;
       const response = await fetch(url);
       if (!response.ok) {
@@ -138,9 +287,10 @@ const MapScreen = ({ navigation }) => {
     }
   }, [userEmail]);
 
+
   useEffect(() => { fetchReports(); }, [fetchReports]);
 
-  /* Modal Animation */
+
   useEffect(() => {
     if (showPreviewModal) {
       Animated.parallel([
@@ -152,6 +302,7 @@ const MapScreen = ({ navigation }) => {
         Animated.timing(animatedScale, { toValue: 0.9, duration: 200, useNativeDriver: true }),
         Animated.timing(animatedOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
       ]).start(() => {
+
         if (!showPreviewModal) {
           setSelectedReport(null);
           setSelectedMarkerIndex(null);
@@ -163,7 +314,7 @@ const MapScreen = ({ navigation }) => {
     }
   }, [showPreviewModal, animatedScale, animatedOpacity]);
 
-  /* Init Location & BLE, Cleanup */
+
   useEffect(() => {
     initializeLocation();
     scanForESP32();
@@ -172,9 +323,10 @@ const MapScreen = ({ navigation }) => {
       bleManager.destroy();
       if (watchIdRef.current) Geolocation.clearWatch(watchIdRef.current);
     };
+
   }, [bleManager]);
 
-  /* Init Location */
+
   const initializeLocation = useCallback(async () => {
     setLoading(true);
     setLastError('');
@@ -189,14 +341,21 @@ const MapScreen = ({ navigation }) => {
         const status = await Geolocation.requestAuthorization('whenInUse');
         granted = status === 'granted';
       }
+
       if (!granted) {
-        Alert.alert('Permission Denied', 'Location permission required.');
+        Alert.alert('Permission Denied', 'Location permission is required to use the map features.');
         setLoading(false);
-        setLastError('Permission denied.');
+        setLastError('Location permission denied.');
+
         const storedLocation = await AsyncStorage.getItem('lastKnownLocation');
-        if (storedLocation) setLocation(JSON.parse(storedLocation));
+        if (storedLocation) {
+            setLocation(JSON.parse(storedLocation));
+            console.log("Loaded last known location due to permission denial.");
+        }
         return;
       }
+
+
       Geolocation.getCurrentPosition(
         (position) => {
           const currentRegion = {
@@ -210,317 +369,496 @@ const MapScreen = ({ navigation }) => {
           setLoading(false);
           startTracking();
         },
-        (error) => {
-          console.error('Location Error:', error);
-          Alert.alert('Location Error', error.message);
-          setLastError(error.message);
+        async (error) => {
+          console.error('Geolocation getCurrentPosition Error:', error);
+          Alert.alert('Location Error', `Could not get current location: ${error.message}`);
+          setLastError(`Location error: ${error.message}`);
           setLoading(false);
-          AsyncStorage.getItem('lastKnownLocation').then(storedLocation => {
-            if (storedLocation) setLocation(JSON.parse(storedLocation));
-          });
+
+          const storedLocation = await AsyncStorage.getItem('lastKnownLocation');
+          if (storedLocation) {
+              setLocation(JSON.parse(storedLocation));
+              console.log("Loaded last known location due to fetch error.");
+          }
         },
         { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 }
       );
     } catch (error) {
-      console.error('Init Error:', error);
-      Alert.alert('Permission Error', error.message);
-      setLastError(error.message);
+      console.error('Location Initialization Error:', error);
+      Alert.alert('Permission Error', `Failed to request location permission: ${error.message}`);
+      setLastError(`Permission error: ${error.message}`);
       setLoading(false);
     }
-  }, []);
+  }, [startTracking]);
 
-  /* Track User Position */
+
   const startTracking = useCallback(() => {
-    if (watchIdRef.current) Geolocation.clearWatch(watchIdRef.current);
-    console.log("Start tracking.");
+
+    if (watchIdRef.current !== null) {
+      Geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+      console.log("Cleared previous location watcher.");
+    }
+
+    console.log("Starting location tracking...");
     watchIdRef.current = Geolocation.watchPosition(
       (position) => {
-        const updatedRegion = {
+
+        setLocation(prevLocation => ({
+          ...prevLocation,
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
-          latitudeDelta: location?.latitudeDelta || 0.01,
-          longitudeDelta: location?.longitudeDelta || 0.01,
-        };
-        setLocation(prev => ({ ...prev, ...updatedRegion }));
-        AsyncStorage.setItem('lastKnownLocation', JSON.stringify(updatedRegion));
+        }));
+
+
       },
-      (error) => console.warn('Watch Error:', error.message),
+      (error) => {
+        console.warn('Location Watch Error:', error.message);
+
+
+      },
+
       { enableHighAccuracy: true, distanceFilter: 10, interval: 10000, fastestInterval: 5000 }
     );
-  }, [location]);
+  }, []);
 
-  /* Center Map */
+
   const centerMapOnUser = useCallback(() => {
     if (location && mapRef.current) {
-      mapRef.current.animateToRegion({ ...location, latitudeDelta: 0.005, longitudeDelta: 0.005 }, 1000);
+      mapRef.current.animateToRegion({
+         latitude: location.latitude,
+         longitude: location.longitude,
+         latitudeDelta: 0.005,
+         longitudeDelta: 0.005,
+        }, 1000);
     } else if (!location) {
-      Alert.alert("Location Needed", "Finding your location...");
+      Alert.alert("Location Needed", "Trying to find your location...", [{ text: "OK" }]);
       initializeLocation();
     }
   }, [location, initializeLocation]);
 
-  /* Scan for ESP32 via BLE */
+
   const scanForESP32 = useCallback(() => {
+
+     if (esp32Connected || esp32Device) {
+         console.log(`Scan skipped: ${esp32Connected ? 'Already connected' : 'Device pending connection'}`);
+         return;
+     }
+
     console.log("Scanning for ESP32...");
     setLastError('');
     bleManager.startDeviceScan([SERVICE_UUID], null, (error, device) => {
       if (error) {
-        if (![601, 2].includes(error.errorCode)) {
-          console.error("BLE Scan Error:", error);
-          setLastError(error.message);
+
+        if (![601, 2, 5 ].includes(error.errorCode)) {
+          console.error("BLE Scan Error:", error.errorCode, error.message);
+          setLastError(`BLE Scan Error: ${error.message}`);
         }
+
+
         return;
       }
+
+
       if (device && device.name && device.name.includes('ESP32') && !esp32Device) {
-        console.log(`Found ESP32: ${device.name}`);
+        console.log(`Found ESP32: ${device.name} (${device.id})`);
         bleManager.stopDeviceScan();
+        console.log("Stopped BLE scan.");
         setEsp32Device(device);
         connectToESP32(device);
       }
     });
-  }, [bleManager, esp32Device, connectToESP32]);
+  }, [bleManager, esp32Device, esp32Connected, connectToESP32]);
 
-  /* Connect to ESP32 */
+
   const connectToESP32 = useCallback(async (device) => {
-    if (!device) return;
-    console.log(`Connecting to ${device.name}...`);
+    if (!device) {
+      console.log("Connect attempt skipped: No device provided.");
+      return;
+    }
+    console.log(`Attempting to connect to ${device.name}...`);
     setLastError('');
     let disconnectSubscription = null;
+
     try {
+
       const isConnected = await device.isConnected();
       if (isConnected) {
-        console.log(`${device.name} already connected.`);
+        console.log(`${device.name} is already connected.`);
         setEsp32Connected(true);
         monitorCharacteristic(device);
         return;
       }
-      disconnectSubscription = device.onDisconnected((error) => {
-        console.warn(`Disconnected: ${error ? error.message : 'Terminated'}`);
+
+
+      disconnectSubscription = device.onDisconnected((error, disconnectedDevice) => {
+        console.warn(`Device ${disconnectedDevice?.name ?? device.name} disconnected. Reason: ${error ? error.message : 'Connection terminated'}`);
         setEsp32Connected(false);
         setEsp32Device(null);
         setLastError("Device disconnected. Scanning again...");
         disconnectSubscription?.remove();
+
         setTimeout(scanForESP32, 3000);
       });
-      const connectedDevice = await device.connect();
+
+
+      const connectedDevice = await device.connect({ timeout: 15000 });
       console.log(`Connected to ${connectedDevice.name}. Discovering services...`);
+
+
       await connectedDevice.discoverAllServicesAndCharacteristics();
-      console.log("Services discovered.");
+      console.log("Services and characteristics discovered.");
+
       setEsp32Connected(true);
       setLastError('');
+
+
       monitorCharacteristic(connectedDevice);
+
     } catch (error) {
-      console.error("Connect error:", error);
-      setLastError(`Connect failed: ${error.message}. Retrying...`);
+      console.error(`Connection to ${device.name} failed:`, error);
+      setLastError(`Connect failed: ${error.message}. Retrying scan...`);
       setEsp32Connected(false);
       setEsp32Device(null);
       disconnectSubscription?.remove();
+
       setTimeout(scanForESP32, 5000);
     }
   }, [bleManager, scanForESP32, monitorCharacteristic]);
 
-  /* Monitor BLE Characteristic */
+
   const monitorCharacteristic = useCallback((device) => {
-    console.log(`Monitor BLE for ${CHARACTERISTIC_UUID_TX}`);
-    device.monitorCharacteristicForService(
+    console.log(`Starting to monitor characteristic ${CHARACTERISTIC_UUID_TX} on ${device.name}`);
+    let monitoringSubscription = null;
+
+    monitoringSubscription = device.monitorCharacteristicForService(
       SERVICE_UUID, CHARACTERISTIC_UUID_TX,
       (error, characteristic) => {
         if (error) {
-          console.error("Monitor Error:", error);
-          setLastError(error.message);
-          if (error.errorCode === 205 || error.message.includes("disconnect")) {
-            // handled by onDisconnected
+          console.error(`Error monitoring characteristic ${CHARACTERISTIC_UUID_TX}:`, error.errorCode, error.message);
+          setLastError(`Monitor Error: ${error.message}`);
+
+          if (error.errorCode === 201 ||
+              error.errorCode === 205 ||
+              error.message.toLowerCase().includes("disconnect")) {
+
+             console.log("Monitoring stopped due to disconnection.");
+             setEsp32Connected(false);
           } else {
-            setEsp32Connected(false);
+
+             setEsp32Connected(false);
           }
+
+
+
           return;
         }
+
+
         if (characteristic?.value) {
           try {
             const decodedValue = base64.decode(characteristic.value);
-            console.log("Data:", decodedValue);
+            console.log("Received BLE Data:", decodedValue);
+
+
             if (decodedValue.startsWith('Button:')) {
               const count = parseInt(decodedValue.split(':')[1], 10);
               if (!isNaN(count)) {
+                console.log(`Button pressed ${count} time(s).`);
                 if (count === 1) handleReport('low');
                 else if (count === 2) handleReport('medium');
                 else if (count === 3) handleReport('high');
-              } else { console.warn("Parse error:", decodedValue); }
+              } else {
+                console.warn("Could not parse button count from:", decodedValue);
+              }
+            } else {
+              console.log("Received non-button data:", decodedValue);
             }
           } catch (decodeError) {
-            console.error("Decode error:", decodeError);
+            console.error("Error decoding base64 BLE data:", decodeError);
             setLastError("Error reading device data.");
           }
         }
       }
     );
+
+
   }, [handleReport]);
 
-  /* Geocode Coordinates */
+
   const getAddressFromCoords = useCallback(async (latitude, longitude) => {
     if (!GOOGLE_MAPS_API_KEY) {
-      console.error("Missing API Key!");
-      setLastError("Google Maps API Key missing.");
-      return { town: 'Config Error', county: 'Config Error', country: 'Config Error' };
+      console.error("Google Maps API Key is missing for geocoding!");
+      setLastError("Geocoding Error: API Key missing.");
+
+      return { town: 'API Key Error', county: 'API Key Error', country: 'API Key Error' };
     }
+
     const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`;
+
     try {
       const response = await fetch(url);
       const data = await response.json();
+
       if (data.status === 'OK' && data.results?.[0]) {
-        let town = 'Unknown', county = 'Unknown', country = 'Unknown';
-        data.results[0].address_components.forEach((component) => {
+        const components = data.results[0].address_components;
+        let town = null, county = null, country = null;
+
+
+        components.forEach((component) => {
           const types = component.types;
-          if (types.includes('locality')) town = component.long_name;
-          else if (types.includes('postal_town') && town === 'Unknown') town = component.long_name;
-          if (types.includes('administrative_area_level_2')) county = component.long_name;
-          else if (types.includes('administrative_area_level_1') && county === 'Unknown') county = component.long_name;
-          if (types.includes('country')) country = component.long_name;
+
+          if (types.includes('locality')) {
+            town = component.long_name;
+          } else if (types.includes('postal_town') && !town) {
+            town = component.long_name;
+          }
+
+          if (types.includes('administrative_area_level_2')) {
+            county = component.long_name;
+          } else if (types.includes('administrative_area_level_1') && !county) {
+             county = component.long_name;
+          }
+
+          if (types.includes('country')) {
+            country = component.long_name;
+          }
         });
-        return { town, county, country };
+
+
+        return {
+          town: town || 'Unknown',
+          county: county || 'Unknown',
+          country: country || 'Unknown',
+        };
+
       } else {
-        console.warn(`Geocode failed: ${data.status}`, data.error_message || '');
+
+        console.warn(`Geocoding failed: ${data.status}`, data.error_message || '');
+        let errorReason = `Geocoding Error: ${data.status}`;
         if (data.status === 'REQUEST_DENIED' || data.error_message?.includes('API key')) {
-          setLastError("Geocoding error: API key/billing.");
+          errorReason = "Geocoding Error: Check API key/billing.";
+          setLastError(errorReason);
+        } else if (data.status === 'ZERO_RESULTS') {
+            errorReason = 'Geocoding: No address found.';
+
         } else {
-          setLastError(`Geocoding error: ${data.status}`);
+            setLastError(errorReason);
         }
         return { town: 'Lookup Failed', county: 'Lookup Failed', country: 'Lookup Failed' };
       }
     } catch (error) {
-      console.error("Geocode network error:", error);
-      setLastError(`Network error: ${error.message}`);
+
+      console.error("Geocoding network error:", error);
+      setLastError(`Geocoding Network Error: ${error.message}`);
       return { town: 'Network Error', county: 'Network Error', country: 'Network Error' };
     }
   }, []);
 
-  /* Submit Report */
+
   const handleReport = useCallback(async (priority) => {
     if (!userEmail) {
-      Alert.alert('Error', 'Please log in.');
+      Alert.alert('Login Required', 'You must be logged in to submit a report.');
       setLastError('User not logged in.');
       return;
     }
     if (!SERVER_URL) {
-      Alert.alert('Error', 'Server config missing.');
+      Alert.alert('Configuration Error', 'The server URL is not configured.');
       setLastError('Server URL missing.');
       return;
     }
+
+
     let currentLocationToReport = location;
     if (!currentLocationToReport) {
+
       try {
-        const storedLocation = await AsyncStorage.getItem('lastKnownLocation');
-        if (storedLocation) currentLocationToReport = JSON.parse(storedLocation);
-      } catch (e) { console.error("Error reading location:", e); }
+        const storedLocationJson = await AsyncStorage.getItem('lastKnownLocation');
+        if (storedLocationJson) {
+          currentLocationToReport = JSON.parse(storedLocationJson);
+          console.log("Using last known location for report:", currentLocationToReport);
+        }
+      } catch (e) {
+        console.error("Error reading last known location from storage:", e);
+      }
     }
-    if (!currentLocationToReport) {
-      Alert.alert('Location Not Available', 'Cannot get location.');
-      setLastError('Location unavailable.');
+
+
+    if (!currentLocationToReport || !currentLocationToReport.latitude || !currentLocationToReport.longitude) {
+      Alert.alert('Location Unavailable', 'Cannot determine your current location to submit the report. Please ensure location services are enabled and try again.');
+      setLastError('Location unavailable for reporting.');
       return;
     }
+
+
     setLastError('');
-    console.log(`Preparing ${priority} report at ${currentLocationToReport.latitude}, ${currentLocationToReport.longitude}`);
+
+
+    console.log(`Preparing '${priority}' priority report at ${currentLocationToReport.latitude.toFixed(5)}, ${currentLocationToReport.longitude.toFixed(5)}`);
+
+
     const { town, county, country } = await getAddressFromCoords(currentLocationToReport.latitude, currentLocationToReport.longitude);
+
+
     const reportData = {
       latitude: currentLocationToReport.latitude,
       longitude: currentLocationToReport.longitude,
-      priority,
+      priority: priority,
       email: userEmail,
-      town,
-      county,
-      country,
+      town: town,
+      county: county,
+      country: country,
+
     };
+
     try {
-      console.log("Sending report:", reportData);
+      console.log("Sending report data:", JSON.stringify(reportData));
       const response = await fetch(`${SERVER_URL}/report`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify(reportData),
       });
+
       const responseData = await response.json();
+
       if (response.ok && responseData.report) {
-        console.log("Report submitted:", responseData);
-        Alert.alert('Report Sent', `Litter report (${priority}) submitted.`);
+
+        console.log("Report successfully submitted:", responseData.report);
+        Alert.alert('Report Sent', `Your ${priority} priority litter report has been submitted successfully.`);
+
         setReports((prevReports) =>
-          [responseData.report, ...prevReports].sort((a, b) => new Date(b.reportedAt) - new Date(a.reportedAt))
+          [responseData.report, ...prevReports]
+
         );
+
+
       } else {
-        const errorMessage = responseData.error || `Server error ${response.status}`;
-        console.error("Server error:", responseData);
-        Alert.alert('Error Sending Report', errorMessage);
-        setLastError(`Report failed: ${errorMessage}`);
+
+        const errorMessage = responseData.error || `Server responded with status ${response.status}`;
+        console.error("Error submitting report:", errorMessage, responseData);
+        Alert.alert('Error Sending Report', `Failed to submit report: ${errorMessage}`);
+        setLastError(`Report submission failed: ${errorMessage}`);
       }
     } catch (error) {
-      console.error("Network error:", error);
-      Alert.alert('Network Error', `Could not submit report: ${error.message}`);
+
+      console.error("Network error during report submission:", error);
+      Alert.alert('Network Error', `Could not connect to the server to submit the report: ${error.message}`);
       setLastError(`Network error: ${error.message}`);
     } finally {
+
       setShowPriorityModal(false);
     }
   }, [userEmail, location, getAddressFromCoords, fetchReports]);
 
-  /* Manual Report Modal */
+
   const handleManualReport = useCallback(async () => {
-    let currentLocationAvailable = !!location;
-    if (!currentLocationAvailable) {
+    let locationAvailable = !!location;
+
+    if (!locationAvailable) {
+
       try {
-        const storedLocation = await AsyncStorage.getItem('lastKnownLocation');
-        if (storedLocation) currentLocationAvailable = true;
-      } catch (e) { }
+        const storedLocationJson = await AsyncStorage.getItem('lastKnownLocation');
+        if (storedLocationJson) {
+          const storedLocation = JSON.parse(storedLocationJson);
+          if (storedLocation.latitude && storedLocation.longitude) {
+            locationAvailable = true;
+
+             setLocation(storedLocation);
+          }
+        }
+      } catch (e) {
+        console.error("Error checking stored location for manual report:", e);
+      }
     }
-    if (!currentLocationAvailable) {
-      Alert.alert("Location Needed", "Fetching your location...", [
-        { text: "OK" },
-        { text: "Retry", onPress: initializeLocation },
-      ]);
-      setLastError('Location needed.');
+
+    if (!locationAvailable) {
+      Alert.alert(
+        "Location Needed",
+        "We need your location to create a report. Trying to get it now...",
+        [
+          { text: "OK" },
+          { text: "Retry Location", onPress: initializeLocation },
+        ]
+      );
+      setLastError('Location needed for manual report.');
       initializeLocation();
       return;
     }
+
+
     setShowPriorityModal(true);
+    setExpandedClusterId(null);
+
   }, [location, initializeLocation]);
 
-  /* Image Picker */
+
   const pickImage = useCallback(() => {
-    console.log("Pick image");
-    const options = { mediaType: 'photo', quality: 0.7, maxWidth: 1024, maxHeight: 1024 };
+    console.log("Opening image picker...");
+    const options = {
+        mediaType: 'photo',
+        quality: 0.7,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        saveToPhotos: false,
+    };
+
     Alert.alert(
       "Select Photo Source",
-      "",
+      "Choose where to get the photo evidence from:",
       [
-        { text: "Camera", onPress: () => launchCamera(options, handleImagePickerResponse) },
-        { text: "Library", onPress: () => launchImageLibrary(options, handleImagePickerResponse) },
+        { text: "Take Photo (Camera)", onPress: () => launchCamera(options, handleImagePickerResponse) },
+        { text: "Choose from Library", onPress: () => launchImageLibrary(options, handleImagePickerResponse) },
         { text: "Cancel", style: "cancel" },
-      ]
+      ],
+      { cancelable: true }
     );
-  }, []);
+  }, [handleImagePickerResponse]);
+
 
   const handleImagePickerResponse = useCallback((response) => {
     if (response.didCancel) {
-      console.log('Cancelled');
-    } else if (response.errorCode) {
-      console.error('ImagePicker Error: ', response.errorMessage);
-      Alert.alert("Image Error", response.errorMessage);
-    } else if (response.assets?.[0]) {
-      console.log("Image picked:", response.assets[0].uri);
-      setPhotoEvidence(response.assets[0]);
+      console.log('User cancelled image picker');
+      return;
+    }
+    if (response.errorCode) {
+      console.error('ImagePicker Error: ', response.errorCode, response.errorMessage);
+      Alert.alert("Image Picker Error", `Could not select image: ${response.errorMessage}`);
+      return;
+    }
+    if (response.assets && response.assets.length > 0 && response.assets[0].uri) {
+
+      const selectedAsset = response.assets[0];
+      console.log("Image selected:", selectedAsset.uri);
+
+      setPhotoEvidence(selectedAsset);
+
+    } else {
+        console.warn("Image picker response did not contain a valid asset.", response);
+        Alert.alert("Image Error", "Could not get a valid image file.");
     }
   }, []);
 
-  /* Submit Image */
+
   const submitPhotoEvidence = useCallback(async () => {
-    if (!photoEvidence || !selectedReport?._id) {
-      Alert.alert("Error", !photoEvidence ? "No photo selected." : "Report missing.");
+    if (!photoEvidence || !photoEvidence.uri) {
+      Alert.alert("Error", "No photo has been selected to submit.");
+      return;
+    }
+    if (!selectedReport || !selectedReport._id) {
+      Alert.alert("Error", "No report is currently selected to attach the photo to.");
       return;
     }
     if (!SERVER_URL) {
-      Alert.alert("Error", "Server config missing.");
+      Alert.alert("Configuration Error", "Server URL is not configured for uploads.");
       setLastError("Server URL missing.");
       return;
     }
-    console.log(`Submitting photo for report ${selectedReport._id}`);
+
+    console.log(`Submitting photo for report ID: ${selectedReport._id}`);
     setIsUploading(true);
     setLastError('');
+
+
     const formData = new FormData();
     formData.append('reportId', selectedReport._id);
     formData.append('image', {
@@ -528,199 +866,271 @@ const MapScreen = ({ navigation }) => {
         ? photoEvidence.uri
         : photoEvidence.uri.replace('file://', ''),
       type: photoEvidence.type || 'image/jpeg',
-      name: photoEvidence.fileName || `report_${selectedReport._id}.jpg`,
+      name: photoEvidence.fileName || `report_${selectedReport._id}_${Date.now()}.jpg`,
     });
+
     try {
       const response = await fetch(`${SERVER_URL}/report/upload`, {
         method: 'POST',
         body: formData,
-        headers: { 'Accept': 'application/json' },
+
+        headers: {
+          'Accept': 'application/json',
+
+        },
       });
+
       const responseData = await response.json();
+
       if (response.ok && responseData.report) {
-        Alert.alert("Success", "Photo submitted!");
+
+        Alert.alert("Success", "Photo evidence uploaded and linked to the report!");
         const updatedReport = responseData.report;
+
+
         setReports(prevReports =>
-          prevReports
-            .map(r => r._id === updatedReport._id ? updatedReport : r)
-            .sort((a, b) => new Date(b.reportedAt) - new Date(a.reportedAt))
+          prevReports.map(r => (r._id === updatedReport._id ? updatedReport : r))
+
         );
+
+
         setSelectedReport(updatedReport);
         setPhotoEvidence(null);
+
+
       } else {
-        const errorMessage = responseData.error || `Upload failed: ${response.status}`;
-        console.error("Upload error:", responseData);
-        Alert.alert("Upload Failed", errorMessage);
-        setLastError(errorMessage);
+
+        const errorMessage = responseData.error || `Upload failed with status ${response.status}`;
+        console.error("Photo upload error:", errorMessage, responseData);
+        Alert.alert("Upload Failed", `Could not upload photo: ${errorMessage}`);
+        setLastError(`Photo upload failed: ${errorMessage}`);
       }
     } catch (error) {
-      console.error("Network error:", error);
-      Alert.alert("Upload Failed", `Network error: ${error.message}`);
+
+      console.error("Network error during photo upload:", error);
+      Alert.alert("Upload Failed", `A network error occurred while uploading: ${error.message}`);
       setLastError(`Network error: ${error.message}`);
     } finally {
       setIsUploading(false);
     }
-  }, [photoEvidence, selectedReport, fetchReports]);
+  }, [photoEvidence, selectedReport, SERVER_URL]);
 
-  /* Remove Image */
+
   const handleRemoveImage = useCallback(async () => {
-    if (!selectedReport?._id || !selectedReport.imageUrl) {
-      Alert.alert("Error", "No image to remove.");
+    if (!selectedReport?._id) {
+      Alert.alert("Error", "No report selected.");
+      return;
+    }
+    if (!selectedReport.imageUrl) {
+      Alert.alert("No Image", "There is no photo evidence attached to this report to remove.");
       return;
     }
     if (!SERVER_URL) {
-      Alert.alert("Error", "Server config missing.");
+      Alert.alert("Configuration Error", "Server URL is not configured.");
       setLastError("Server URL missing.");
       return;
     }
+
+
     Alert.alert(
       "Confirm Deletion",
-      "Remove photo evidence?",
+      "Are you sure you want to remove the photo evidence for this report?",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Remove Image",
+          text: "Remove Photo",
           style: "destructive",
           onPress: async () => {
-            console.log(`Removing image for ${selectedReport._id}`);
+            console.log(`Requesting image removal for report ID: ${selectedReport._id}`);
             setIsDeletingImage(true);
             setLastError('');
+
             try {
               const response = await fetch(`${SERVER_URL}/report/image/${selectedReport._id}`, {
                 method: 'DELETE',
                 headers: { 'Accept': 'application/json' },
               });
+
               const responseData = await response.json();
+
               if (response.ok && responseData.report) {
-                Alert.alert("Success", "Photo removed.");
+
+                Alert.alert("Success", "Photo evidence has been removed.");
                 const updatedReport = responseData.report;
+
+
                 setReports(prevReports =>
-                  prevReports
-                    .map(r => r._id === updatedReport._id ? updatedReport : r)
-                    .sort((a, b) => new Date(b.reportedAt) - new Date(a.reportedAt))
+                  prevReports.map(r => (r._id === updatedReport._id ? updatedReport : r))
                 );
+
+
                 setSelectedReport(updatedReport);
                 setPhotoEvidence(null);
+
               } else {
-                const errorMessage = responseData.error || `Removal failed: ${response.status}`;
-                console.error("Removal error:", responseData);
-                Alert.alert("Removal Failed", errorMessage);
+
+                const errorMessage = responseData.error || `Removal failed with status ${response.status}`;
+                console.error("Image removal error:", errorMessage, responseData);
+                Alert.alert("Removal Failed", `Could not remove photo: ${errorMessage}`);
                 setLastError(`Image removal failed: ${errorMessage}`);
               }
             } catch (error) {
-              console.error("Network error:", error);
-              Alert.alert("Removal Failed", `Network error: ${error.message}`);
+
+              console.error("Network error during image removal:", error);
+              Alert.alert("Removal Failed", `A network error occurred: ${error.message}`);
               setLastError(`Network error: ${error.message}`);
             } finally {
               setIsDeletingImage(false);
             }
           },
         },
-      ]
+      ],
+      { cancelable: true }
     );
-  }, [selectedReport, fetchReports]);
+  }, [selectedReport, SERVER_URL]);
 
-  /* Mark Report Clean */
+
   const markReportClean = useCallback(async () => {
     if (!selectedReport?._id) {
-      Alert.alert("Error", "No report selected.");
+      Alert.alert("Error", "No report is currently selected.");
       return;
     }
     if (!SERVER_URL) {
-      Alert.alert("Error", "Server config missing.");
+      Alert.alert("Configuration Error", "Server URL is not configured.");
       return;
     }
-    console.log(`Marking ${selectedReport._id} as clean.`);
+
+    console.log(`Marking report ${selectedReport._id} as clean.`);
     setIsUploading(true);
+    setLastError('');
+
     try {
       const response = await fetch(`${SERVER_URL}/report/clean`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify({ reportId: selectedReport._id }),
       });
+
       const responseData = await response.json();
+
       if (response.ok) {
-        Alert.alert("Success", "Report marked clean.");
+        Alert.alert("Success", "Report has been marked as cleaned.");
+
         const cleanedReportId = selectedReport._id;
         const currentIndex = userMarkers.findIndex(r => r._id === cleanedReportId);
-        const updatedReports = reports.filter(report => report._id !== cleanedReportId);
-        setReports(updatedReports);
-        const remainingMarkers = updatedReports
-          .filter(report => report.email && report.email.toLowerCase() === userEmail.toLowerCase())
-          .sort((a, b) => new Date(b.reportedAt) - new Date(a.reportedAt));
+
+
+        setReports(prevReports => prevReports.filter(report => report._id !== cleanedReportId));
+
+
+        const remainingUserMarkers = userMarkers.filter(report => report._id !== cleanedReportId);
+
         setPhotoEvidence(null);
-        if (remainingMarkers.length === 0) {
+
+        if (remainingUserMarkers.length === 0) {
+
           setShowPreviewModal(false);
+          setSelectedReport(null);
+          setSelectedMarkerIndex(null);
         } else {
-          const newIndex = Math.min(currentIndex, remainingMarkers.length - 1);
+
+
+          const newIndex = Math.min(currentIndex, remainingUserMarkers.length - 1);
           setSelectedMarkerIndex(newIndex);
-          setSelectedReport(remainingMarkers[newIndex]);
+          setSelectedReport(remainingUserMarkers[newIndex]);
         }
+
       } else {
-        throw new Error(responseData.error || `Server error ${response.status}`);
+
+        const errorMessage = responseData.error || `Failed with status ${response.status}`;
+        throw new Error(errorMessage);
       }
     } catch (error) {
-      console.error("Mark clean error:", error);
-      Alert.alert("Update Failed", `Could not mark clean: ${error.message}`);
-      setLastError(`Failed: ${error.message}`);
+      console.error("Error marking report as clean:", error);
+      Alert.alert("Update Failed", `Could not mark report as clean: ${error.message}`);
+      setLastError(`Failed to mark clean: ${error.message}`);
     } finally {
       setIsUploading(false);
     }
-  }, [selectedReport, reports, userEmail, userMarkers, fetchReports]);
+  }, [selectedReport, reports, userEmail, userMarkers, SERVER_URL]);
 
-  /* Modal Navigation */
+
   const goToPreviousMarker = useCallback(() => {
-    if (userMarkers.length > 0 && selectedMarkerIndex > 0) {
-      const newIndex = selectedMarkerIndex - 1;
-      setSelectedMarkerIndex(newIndex);
-      setSelectedReport(userMarkers[newIndex]);
-      setPhotoEvidence(null);
-      setIsUploading(false);
-      setIsDeletingImage(false);
+    if (!userMarkers || userMarkers.length <= 1 || selectedMarkerIndex === null || selectedMarkerIndex === 0) {
+      return;
     }
+    const newIndex = selectedMarkerIndex - 1;
+    setSelectedMarkerIndex(newIndex);
+    setSelectedReport(userMarkers[newIndex]);
+
+    setPhotoEvidence(null);
+    setIsUploading(false);
+    setIsDeletingImage(false);
   }, [userMarkers, selectedMarkerIndex]);
 
   const goToNextMarker = useCallback(() => {
-    if (userMarkers.length > 0 && selectedMarkerIndex !== null && selectedMarkerIndex < userMarkers.length - 1) {
-      const newIndex = selectedMarkerIndex + 1;
-      setSelectedMarkerIndex(newIndex);
-      setSelectedReport(userMarkers[newIndex]);
-      setPhotoEvidence(null);
-      setIsUploading(false);
-      setIsDeletingImage(false);
+    if (!userMarkers || userMarkers.length <= 1 || selectedMarkerIndex === null || selectedMarkerIndex >= userMarkers.length - 1) {
+      return;
     }
+    const newIndex = selectedMarkerIndex + 1;
+    setSelectedMarkerIndex(newIndex);
+    setSelectedReport(userMarkers[newIndex]);
+
+    setPhotoEvidence(null);
+    setIsUploading(false);
+    setIsDeletingImage(false);
   }, [userMarkers, selectedMarkerIndex]);
 
-  /* Logout */
+
   const handleLogout = useCallback(() => {
+    console.log("Attempting logout...");
     signOut(auth)
       .then(() => {
-        console.log("Signed out.");
-        navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+        console.log("User signed out successfully.");
+
+        setUserEmail('');
+        setReports([]);
+        setSelectedReport(null);
+        setSelectedMarkerIndex(null);
+        setPhotoEvidence(null);
+        setEsp32Device(null);
+        setEsp32Connected(false);
+        setLastError('');
+        setExpandedClusterId(null);
+        AsyncStorage.removeItem('userEmail');
+
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Home' }],
+        });
       })
       .catch((error) => {
-        console.error('Logout error: ', error);
-        Alert.alert("Logout Error", error.message);
+        console.error('Logout Error:', error);
+        Alert.alert("Logout Failed", `An error occurred during sign out: ${error.message}`);
       });
-  }, [navigation]);
+  }, [navigation, auth]);
 
-  /* Render */
-  if (loading) {
+
+
+
+  if (loading && !location) {
     return (
       <View style={styles.loadingContainer}>
         <StatusBar barStyle="light-content" backgroundColor="#000" />
-        <Text style={styles.loadingText}>Initializing...</Text>
+        <Text style={styles.loadingText}>Initializing Map & Location...</Text>
         <ActivityIndicator size="large" color="#1e90ff" />
       </View>
     );
   }
+
 
   if (!location) {
     return (
       <View style={styles.loadingContainer}>
         <StatusBar barStyle="light-content" backgroundColor="#000" />
         <Text style={styles.errorText}>Location Not Available</Text>
-        <Text style={styles.modalText}>Ensure services enabled & permissions granted.</Text>
+        <Text style={styles.modalText}>LitterWarden requires location access.</Text>
+        <Text style={styles.modalText}>Please ensure services are enabled & permissions granted in settings.</Text>
         {lastError ? (
           <Text style={[styles.modalText, { marginTop: 5, color: 'orange' }]}>
             Details: {lastError}
@@ -739,9 +1149,11 @@ const MapScreen = ({ navigation }) => {
     );
   }
 
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#000" />
+
 
       {lastError ? (
         <View style={styles.errorContainer}>
@@ -753,6 +1165,7 @@ const MapScreen = ({ navigation }) => {
           </TouchableOpacity>
         </View>
       ) : null}
+
 
       <View style={styles.mapContainer}>
         <MapView
@@ -766,34 +1179,72 @@ const MapScreen = ({ navigation }) => {
           rotateEnabled={false}
           scrollEnabled={true}
           zoomEnabled={true}
+          onPress={(e) => {
+
+              if (e.nativeEvent.action !== 'marker-press') {
+                  setExpandedClusterId(null);
+              }
+          }}
+
         >
-          {userMarkers.map((report) => (
+
+          {processedMarkers.singles.map((report) => (
             <Marker
-              key={`user-report-${report._id}`}
+              key={`single-${report._id}`}
               coordinate={{ latitude: report.latitude, longitude: report.longitude }}
               image={markerImages[report.priority?.toLowerCase()] || markerImages.low}
-              onPress={() => {
-                const markerIndex = userMarkers.findIndex((um) => um._id === report._id);
-                if (markerIndex !== -1) {
-                  setSelectedReport(report);
-                  setSelectedMarkerIndex(markerIndex);
-                  setShowPreviewModal(true);
-                } else {
-                  console.warn("Marker not found.");
-                }
-              }}
+              anchor={{ x: 0.5, y: 1 }}
+              onPress={() => handleMarkerPress(report)}
+              stopPropagation={true}
             />
           ))}
+
+
+          {processedMarkers.clusters.map((cluster) =>
+
+            expandedClusterId === cluster.id ? (
+              cluster.markers.map((report) => (
+                <Marker
+                  key={`expanded-${report._id}`}
+                  coordinate={{ latitude: report.latitude, longitude: report.longitude }}
+                  image={markerImages[report.priority?.toLowerCase()] || markerImages.low}
+                  anchor={{ x: 0.5, y: 1 }}
+                  onPress={() => handleMarkerPress(report)}
+                  stopPropagation={true}
+                  zIndex={10}
+                />
+              ))
+            ) : (
+
+              <Marker
+                key={cluster.id}
+                coordinate={cluster.center}
+                onPress={() => handleClusterPress(cluster.id)}
+                stopPropagation={true}
+                anchor={{ x: 0.5, y: 0.5 }}
+                zIndex={5}
+              >
+
+                <View style={styles.clusterContainer}>
+                  <Text style={styles.clusterText}>{cluster.count}</Text>
+                </View>
+              </Marker>
+            )
+          )}
         </MapView>
+
+
         <TouchableOpacity style={styles.refreshButton} onPress={centerMapOnUser}>
-          <Text style={styles.refreshButtonText}>Center Map</Text>
+          <Text style={styles.refreshButtonText}>Center</Text>
         </TouchableOpacity>
       </View>
 
+
       <View style={styles.bottomSectionContainer}>
+
         <View style={styles.deviceStatusContainer}>
           <Text style={[styles.deviceStatusText, { color: esp32Connected ? '#4CAF50' : '#f44336' }]}>
-            {esp32Connected ? 'Device Connected' : esp32Device ? 'Device Disconnected!' : 'Searching...'}
+            {esp32Connected ? 'Device Connected' : esp32Device ? 'Device Disconnected!' : 'Searching for Device...'}
           </Text>
           {!esp32Connected && (
             <TouchableOpacity
@@ -805,6 +1256,7 @@ const MapScreen = ({ navigation }) => {
             </TouchableOpacity>
           )}
         </View>
+
 
         <View style={styles.extraButtonContainer}>
           <TouchableOpacity
@@ -823,8 +1275,9 @@ const MapScreen = ({ navigation }) => {
                 setSelectedMarkerIndex(0);
                 setSelectedReport(userMarkers[0]);
                 setShowPreviewModal(true);
+                setExpandedClusterId(null);
               } else {
-                Alert.alert('No Reports', 'No active reports.');
+                Alert.alert('No Reports', 'You have no active litter reports.');
                 fetchReports();
               }
             }}
@@ -839,12 +1292,16 @@ const MapScreen = ({ navigation }) => {
           </TouchableOpacity>
         </View>
 
+
         <View style={styles.emailContainer}>
           <Text style={styles.emailText} numberOfLines={1} ellipsizeMode="tail">
             Logged in as: {userEmail || 'Guest'}
           </Text>
         </View>
       </View>
+
+
+
 
       {showPriorityModal && (
         <Modal
@@ -858,25 +1315,26 @@ const MapScreen = ({ navigation }) => {
             activeOpacity={1}
             onPressOut={() => setShowPriorityModal(false)}
           >
+
             <View style={styles.priorityModalContainer} onStartShouldSetResponder={() => true}>
-              <Text style={styles.priorityModalHeader}>Select Priority</Text>
+              <Text style={styles.priorityModalHeader}>Select Report Priority</Text>
               <TouchableOpacity
                 style={[styles.priorityButton, styles.lowPriority]}
                 onPress={() => handleReport('low')}
               >
-                <Text style={styles.priorityButtonText}>Low</Text>
+                <Text style={styles.priorityButtonText}>Low Priority</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.priorityButton, styles.mediumPriority]}
                 onPress={() => handleReport('medium')}
               >
-                <Text style={styles.priorityButtonText}>Medium</Text>
+                <Text style={styles.priorityButtonText}>Medium Priority</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.priorityButton, styles.highPriority]}
                 onPress={() => handleReport('high')}
               >
-                <Text style={styles.priorityButtonText}>High</Text>
+                <Text style={styles.priorityButtonText}>High Priority</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.priorityButton, styles.cancelButton]}
@@ -889,6 +1347,7 @@ const MapScreen = ({ navigation }) => {
         </Modal>
       )}
 
+
       {showPreviewModal && selectedReport && (
         <Modal
           transparent
@@ -897,25 +1356,34 @@ const MapScreen = ({ navigation }) => {
           onRequestClose={() => setShowPreviewModal(false)}
         >
           <View style={styles.modalOverlay}>
+
             <Animated.View
-              style={[styles.modalContainer, { transform: [{ scale: animatedScale }], opacity: animatedOpacity }]}
+              style={[
+                styles.modalContainer,
+                { transform: [{ scale: animatedScale }], opacity: animatedOpacity }
+              ]}
             >
               <Text style={styles.modalHeader}>Report Details</Text>
+
               <ScrollView
                 style={{ width: '100%', flexShrink: 1 }}
                 contentContainerStyle={{ alignItems: 'center', paddingBottom: 10 }}
                 showsVerticalScrollIndicator={true}
               >
-                {userMarkers.length > 1 && (
+
+                {userMarkers.length > 1 && selectedMarkerIndex !== null && (
                   <Text style={styles.paginationText}>
                     Report {selectedMarkerIndex + 1} of {userMarkers.length}
                   </Text>
                 )}
+
+
                 <Text style={styles.modalText}>
                   Priority:{' '}
                   <Text
                     style={[
                       styles.modalTextHighlight,
+
                       styles[`priorityText${selectedReport.priority.charAt(0).toUpperCase() + selectedReport.priority.slice(1)}`],
                     ]}
                   >
@@ -925,26 +1393,13 @@ const MapScreen = ({ navigation }) => {
                 <Text style={styles.modalText} selectable={true}>
                   Location:{' '}
                   <Text style={styles.modalTextHighlight}>
-                    {selectedReport.town &&
-                    !['Unknown', 'Config Error', 'Lookup Failed', 'Network Error'].includes(selectedReport.town)
-                      ? `${selectedReport.town}, `
-                      : ''}
-                    {selectedReport.county &&
-                    !['Unknown', 'Config Error', 'Lookup Failed', 'Network Error'].includes(selectedReport.county)
-                      ? `${selectedReport.county}`
-                      : !selectedReport.town ||
-                        ['Unknown', 'Config Error', 'Lookup Failed', 'Network Error'].includes(selectedReport.town)
-                      ? `(${selectedReport.latitude.toFixed(4)}, ${selectedReport.longitude.toFixed(4)})`
-                      : ''}
-                    {selectedReport.country &&
-                    !['Unknown', 'Config Error', 'Lookup Failed', 'Network Error'].includes(selectedReport.country)
-                      ? `, ${selectedReport.country}`
-                      : ''}
-                    {selectedReport.town === 'Config Error' ||
-                    selectedReport.town === 'Lookup Failed' ||
-                    selectedReport.town === 'Network Error'
-                      ? ` (${selectedReport.town})`
-                      : ''}
+
+                    {(selectedReport.town && !['Unknown', 'API Key Error', 'Lookup Failed', 'Network Error'].includes(selectedReport.town)) ? `${selectedReport.town}, ` : ''}
+                    {(selectedReport.county && !['Unknown', 'API Key Error', 'Lookup Failed', 'Network Error'].includes(selectedReport.county)) ? `${selectedReport.county}` : (!selectedReport.town || ['Unknown', 'API Key Error', 'Lookup Failed', 'Network Error'].includes(selectedReport.town)) ? `(${selectedReport.latitude.toFixed(4)}, ${selectedReport.longitude.toFixed(4)})` : ''}
+                    {(selectedReport.country && !['Unknown', 'API Key Error', 'Lookup Failed', 'Network Error'].includes(selectedReport.country)) ? `, ${selectedReport.country}` : ''}
+
+                    {(selectedReport.town === 'API Key Error' || selectedReport.town === 'Lookup Failed' || selectedReport.town === 'Network Error') ? ` (${selectedReport.town})` : ''}
+
                   </Text>
                 </Text>
                 <Text style={styles.modalText}>
@@ -953,19 +1408,25 @@ const MapScreen = ({ navigation }) => {
                     {selectedReport.latitude.toFixed(5)}, {selectedReport.longitude.toFixed(5)}
                   </Text>
                 </Text>
-                <Text style={styles.modalText}>
-                  Status:{' '}
-                  <Text style={styles.modalTextHighlight}>
-                    {selectedReport.recognizedCategory || 'Pending'}
-                  </Text>
-                </Text>
+
+                {selectedReport.recognizedCategory && (
+                    <Text style={styles.modalText}>
+                    Status:{' '}
+                    <Text style={styles.modalTextHighlight}>
+                        {selectedReport.recognizedCategory}
+                    </Text>
+                    </Text>
+                )}
                 <Text style={styles.modalText}>
                   Reported:{' '}
                   <Text style={styles.modalTextHighlight}>
                     {new Date(selectedReport.reportedAt).toLocaleString()}
                   </Text>
                 </Text>
+
+
                 <View style={styles.evidenceSection}>
+
                   {photoEvidence ? (
                     <View style={styles.imageFrame}>
                       <Image source={{ uri: photoEvidence.uri }} style={styles.evidencePreview} resizeMode="contain" />
@@ -975,19 +1436,25 @@ const MapScreen = ({ navigation }) => {
                       <Image source={{ uri: selectedReport.imageUrl }} style={styles.evidencePreview} resizeMode="contain" />
                     </View>
                   ) : (
+
                     <View style={styles.noPhotoContainer}>
-                      <Text style={styles.noPhotoText}>No Photo</Text>
+                      <Text style={styles.noPhotoText}>No Photo Evidence</Text>
                     </View>
                   )}
+
+
+
                   {!selectedReport.imageUrl && !photoEvidence && (
                     <TouchableOpacity
                       style={styles.evidenceButton}
                       onPress={pickImage}
                       disabled={isUploading || isDeletingImage}
                     >
-                      <Text style={styles.evidenceButtonText}>Add Photo</Text>
+                      <Text style={styles.evidenceButtonText}>Add Photo Evidence</Text>
                     </TouchableOpacity>
                   )}
+
+
                   {selectedReport.imageUrl && !photoEvidence && (
                     <TouchableOpacity
                       style={[styles.modalButton, styles.removeButton, { marginTop: 5 }, isDeletingImage && { opacity: 0.5 }]}
@@ -997,10 +1464,12 @@ const MapScreen = ({ navigation }) => {
                       {isDeletingImage ? (
                         <ActivityIndicator color="#fff" size="small" />
                       ) : (
-                        <Text style={styles.modalButtonText}>Remove</Text>
+                        <Text style={styles.modalButtonText}>Remove Photo</Text>
                       )}
                     </TouchableOpacity>
                   )}
+
+
                   {photoEvidence && (
                     <View style={{ flexDirection: 'row', justifyContent: 'space-around', width: '80%', marginTop: 5 }}>
                       <TouchableOpacity
@@ -1008,49 +1477,57 @@ const MapScreen = ({ navigation }) => {
                         onPress={submitPhotoEvidence}
                         disabled={isUploading || isDeletingImage}
                       >
-                        {isUploading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonText}>Submit</Text>}
+                        {isUploading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonText}>Submit Photo</Text>}
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[styles.modalButton, styles.changeButton, { flex: 1, marginHorizontal: 5 }, (isUploading || isDeletingImage) && { opacity: 0.5 }]}
                         onPress={pickImage}
                         disabled={isUploading || isDeletingImage}
                       >
-                        <Text style={styles.modalButtonText}>Change</Text>
+                        <Text style={styles.modalButtonText}>Change Photo</Text>
                       </TouchableOpacity>
                     </View>
                   )}
                 </View>
               </ScrollView>
+
+
               <View style={styles.modalFooterContainer}>
-                <View style={styles.modalNavContainer}>
-                  <TouchableOpacity
-                    style={[styles.navButton, (selectedMarkerIndex === null || selectedMarkerIndex === 0) && styles.navButtonDisabled]}
-                    onPress={goToPreviousMarker}
-                    disabled={selectedMarkerIndex === null || selectedMarkerIndex === 0}
-                  >
-                    <Text style={styles.navButtonText}>{'<'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.cleanButton, (isUploading || isDeletingImage) && { opacity: 0.5 }]}
-                    onPress={markReportClean}
-                    disabled={isUploading || isDeletingImage}
-                  >
-                    {isUploading || isDeletingImage ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonText}>Mark Clean</Text>}
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.navButton, (selectedMarkerIndex === null || selectedMarkerIndex >= userMarkers.length - 1) && styles.navButtonDisabled]}
-                    onPress={goToNextMarker}
-                    disabled={selectedMarkerIndex === null || selectedMarkerIndex >= userMarkers.length - 1}
-                  >
-                    <Text style={styles.navButtonText}>{'>'}</Text>
-                  </TouchableOpacity>
-                </View>
+
+                 <View style={styles.modalNavContainer}>
+                    <TouchableOpacity
+                        style={[styles.navButton, (selectedMarkerIndex === null || selectedMarkerIndex === 0 || userMarkers.length <= 1) && styles.navButtonDisabled]}
+                        onPress={goToPreviousMarker}
+                        disabled={selectedMarkerIndex === null || selectedMarkerIndex === 0 || userMarkers.length <= 1}
+                    >
+                        <Text style={styles.navButtonText}>{'<'}</Text>
+                    </TouchableOpacity>
+
+
+                    <TouchableOpacity
+                        style={[styles.cleanButton, (isUploading || isDeletingImage) && { opacity: 0.5 }]}
+                        onPress={markReportClean}
+                        disabled={isUploading || isDeletingImage}
+                    >
+                        {isUploading || isDeletingImage ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonText}>Mark Cleaned</Text>}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={[styles.navButton, (selectedMarkerIndex === null || selectedMarkerIndex >= userMarkers.length - 1 || userMarkers.length <= 1) && styles.navButtonDisabled]}
+                        onPress={goToNextMarker}
+                        disabled={selectedMarkerIndex === null || selectedMarkerIndex >= userMarkers.length - 1 || userMarkers.length <= 1}
+                    >
+                        <Text style={styles.navButtonText}>{'>'}</Text>
+                    </TouchableOpacity>
+                 </View>
+
+
                 <TouchableOpacity
                   style={[styles.closeButton, (isUploading || isDeletingImage) && { opacity: 0.5 }]}
                   onPress={() => setShowPreviewModal(false)}
                   disabled={isUploading || isDeletingImage}
                 >
-                  <Text style={styles.modalButtonText}>Close</Text>
+                  <Text style={styles.modalButtonText}>Close Details</Text>
                 </TouchableOpacity>
               </View>
             </Animated.View>
