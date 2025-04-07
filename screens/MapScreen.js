@@ -849,81 +849,149 @@ const MapScreen = ({ navigation }) => {
       Alert.alert("Error", "No report is currently selected.");
       return;
     }
+    if (!SERVER_URL) {
+        Alert.alert("Configuration Error", "SERVER_URL is not defined in the app.");
+        setLastError("Frontend Config Error: SERVER_URL missing.");
+        return;
+    }
   
     setIsUploading(true);
     setLastError('');
+    console.log(`Starting photo evidence submission for report ${selectedReport._id}`);
   
     try {
+      // --- Step 0: Get the image data as a blob ---
+      console.log("Fetching image blob from:", photoEvidence.uri);
       const response = await fetch(photoEvidence.uri);
-      const blob = await response.blob();
-  
-      const extension = photoEvidence.fileName?.split('.').pop() || 'jpg';
-      const fileType = photoEvidence.type || 'image/jpeg';
-      const filename = `reports/${selectedReport._id}_${Date.now()}.${extension}`;
-  
-      // 1. Get a presigned URL from your backend
-      const presignRes = await fetch(`${SERVER_URL}/s3/presign?filename=${filename}&type=${encodeURIComponent(fileType)}`);
-
-if (!presignRes.ok) {
-  const text = await presignRes.text(); // Log raw response for debugging
-  console.error("Presign Error Body:", text);
-  throw new Error(`Failed to get S3 presigned URL: ${presignRes.status}`);
-}
-
-const { url } = await presignRes.json();
-
-  
-      if (!presignRes.ok || !url) {
-        throw new Error("Failed to get S3 presigned URL");
+      if (!response.ok) {
+          throw new Error(`Failed to fetch local image file: Status ${response.status}`);
       }
+      const blob = await response.blob();
+      console.log("Image blob fetched successfully. Size:", blob.size, "Type:", blob.type);
   
-      // 2. Upload to S3 using the presigned URL
-      const uploadRes = await fetch(url, {
+      const extension = photoEvidence.fileName?.split('.').pop()?.toLowerCase() || 'jpg';
+      // Use blob.type if available and seems valid, otherwise fallback based on extension or default
+      const fileType = blob.type && blob.type.startsWith('image/') ? blob.type : (photoEvidence.type || 'image/jpeg');
+      const filename = `reports/${selectedReport._id}_${Date.now()}.${extension}`;
+      console.log(`Prepared filename: ${filename}, type: ${fileType}`);
+  
+      // --- Step 1: Get a presigned URL from your backend ---
+      const presignUrlEndpoint = `${SERVER_URL}/s3/presign?filename=${encodeURIComponent(filename)}&type=${encodeURIComponent(fileType)}`;
+      console.log("Requesting presigned URL from:", presignUrlEndpoint);
+  
+      const presignRes = await fetch(presignUrlEndpoint);
+  
+      // --- !!! IMPORTANT ERROR HANDLING !!! ---
+      if (!presignRes.ok) {
+        const errorText = await presignRes.text(); // Read the response as text
+        console.error("--------------------------------------------------");
+        console.error("Fetching Presigned URL FAILED! Status:", presignRes.status);
+        console.error("Raw Server Response Text:");
+        console.error(errorText); // Log the raw response (could be HTML)
+        console.error("--------------------------------------------------");
+  
+        // Try to provide a more specific error message if possible
+        let detailedError = `Failed to get S3 presigned URL. Server responded with status ${presignRes.status}.`;
+        if (errorText.toLowerCase().includes('bucket name not configured')) {
+            detailedError = "Server Error: S3 Bucket Name is not configured on the backend.";
+        } else if (errorText.toLowerCase().includes('access denied')) {
+            detailedError = "Server Error: AWS IAM permissions issue (Access Denied). Check backend logs/permissions.";
+        } else if (errorText.toLowerCase().includes('invalid access key id')) {
+            detailedError = "Server Error: Invalid AWS Access Key ID configured on the backend.";
+        } else if (presignRes.status === 500 && errorText.toLowerCase().includes('<html')) {
+             detailedError = `Server Error 500. The server returned an HTML error page instead of JSON. Check backend logs on Render.`;
+        }
+        // Add more specific checks based on common errors seen in logs
+  
+        throw new Error(detailedError); // Throw the error to be caught by the catch block
+      }
+      // --- End of Important Error Handling ---
+  
+      // If we get here, presignRes.ok was true, proceed to parse JSON
+      const presignData = await presignRes.json();
+      const { url: presignedUploadUrl } = presignData; // Destructure the URL
+  
+      if (!presignedUploadUrl) {
+        console.error("Presigned URL response missing 'url' field:", presignData);
+        throw new Error("Server responded successfully but did not provide a presigned URL.");
+      }
+      console.log("Successfully obtained presigned URL (first few chars):", presignedUploadUrl.substring(0, 100) + "...");
+  
+      // --- Step 2: Upload the image blob to S3 using the presigned URL ---
+      console.log("Uploading image blob to S3...");
+      const uploadRes = await fetch(presignedUploadUrl, {
         method: 'PUT',
         body: blob,
-        headers: { 'Content-Type': fileType }
+        headers: {
+          'Content-Type': fileType // Crucial header for S3 PUT via presigned URL
+        }
       });
   
       if (!uploadRes.ok) {
-        throw new Error("Upload to S3 failed.");
+        const uploadErrorText = await uploadRes.text();
+        console.error("--------------------------------------------------");
+        console.error("S3 Upload FAILED! Status:", uploadRes.status);
+        console.error("S3 Response Text:", uploadErrorText);
+        console.error("--------------------------------------------------");
+        throw new Error(`Upload to S3 failed with status ${uploadRes.status}. Check S3 CORS/Permissions or presigned URL validity.`);
       }
+      console.log("S3 Upload successful. Status:", uploadRes.status);
   
-      // 3. Extract the public URL
-      const imageUrl = url.split('?')[0];
-      console.log("S3 Upload success. Image URL:", imageUrl);
+      // --- Step 3: Extract the permanent public URL (optional, depends on bucket policy) ---
+      // The URL *before* the query string is usually the object's permanent URL if the object is public
+      const imageUrl = presignedUploadUrl.split('?')[0];
+      console.log("Derived S3 Image URL:", imageUrl);
   
-      // 4. PATCH image URL to backend
-      const responseUpdate = await fetch(`${SERVER_URL}/report/image/${selectedReport._id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl }),
+      // --- Step 4: PATCH the image URL back to your backend server ---
+      const updateEndpoint = `${SERVER_URL}/report/image/${selectedReport._id}`;
+      console.log("Updating report with image URL via PATCH:", updateEndpoint);
+      const responseUpdate = await fetch(updateEndpoint, {
+        method: 'PATCH', // Assuming your backend uses PATCH for this
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+         },
+        body: JSON.stringify({ imageUrl: imageUrl }), // Send the permanent URL
       });
   
       const responseData = await responseUpdate.json();
   
       if (responseUpdate.ok && responseData.report) {
-        Alert.alert("Success", "Photo evidence uploaded to S3 and saved.");
+        console.log("Backend update successful:", responseData.report);
+        Alert.alert("Success", "Photo evidence uploaded and saved successfully!");
         const updatedReport = responseData.report;
   
+        // Update local state
         setReports(prevReports =>
           prevReports.map(r => (r._id === updatedReport._id ? updatedReport : r))
         );
+        setSelectedReport(updatedReport); // Update the currently viewed report
+        setPhotoEvidence(null); // Clear the temporary photo state
   
-        setSelectedReport(updatedReport);
-        setPhotoEvidence(null);
       } else {
-        const errorMessage = responseData.error || `Server responded with ${responseUpdate.status}`;
-        throw new Error(errorMessage);
+        // Handle backend update failure
+        const errorMessage = responseData.error || `Backend update failed with status ${responseUpdate.status}`;
+        console.error("Backend update failed:", errorMessage, responseData);
+        // Inform the user, but the image IS in S3. Maybe offer a retry?
+        Alert.alert("Partial Success", `Image uploaded to S3, but failed to update report record: ${errorMessage}. Please try updating later or contact support.`);
+        // Optionally, keep the photoEvidence state so they don't have to re-select?
       }
   
     } catch (error) {
-      console.error("S3 Upload Failed:", error);
-      Alert.alert("Upload Failed", error.message);
-      setLastError(`Upload error: ${error.message}`);
+      // Catch errors from any step (fetch blob, get presigned URL, upload to S3, update backend)
+      console.error("--------------------------------------------------");
+      console.error("Photo Evidence Submission FAILED:", error);
+      console.error("Error Name:", error.name);
+      console.error("Error Message:", error.message);
+      console.error("--------------------------------------------------");
+      Alert.alert("Upload Failed", `An error occurred: ${error.message}`);
+      setLastError(`Upload error: ${error.message}`); // Update error state
     } finally {
-      setIsUploading(false);
+      // This block always runs, whether try succeeded or failed
+      setIsUploading(false); // Ensure loading indicator stops
+      console.log("Photo evidence submission process finished.");
     }
-  }, [photoEvidence, selectedReport, SERVER_URL]);
+  }, [photoEvidence, selectedReport, SERVER_URL, setReports, setSelectedReport, setPhotoEvidence, setIsUploading, setLastError]); // Include all dependencies
   
   
 
