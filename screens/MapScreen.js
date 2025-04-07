@@ -863,7 +863,15 @@ const MapScreen = ({ navigation }) => {
   
       // 1. Get a presigned URL from your backend
       const presignRes = await fetch(`${SERVER_URL}/s3/presign?filename=${filename}&type=${encodeURIComponent(fileType)}`);
-      const { url } = await presignRes.json();
+
+if (!presignRes.ok) {
+  const text = await presignRes.text(); // Log raw response for debugging
+  console.error("Presign Error Body:", text);
+  throw new Error(`Failed to get S3 presigned URL: ${presignRes.status}`);
+}
+
+const { url } = await presignRes.json();
+
   
       if (!presignRes.ok || !url) {
         throw new Error("Failed to get S3 presigned URL");

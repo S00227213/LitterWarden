@@ -14,26 +14,30 @@ const s3 = new S3Client({
 });
 
 router.get('/presign', async (req, res) => {
-    const { filename, type } = req.query;
-  
-    if (!filename || !type) {
-      return res.status(400).json({ error: "Missing filename or type" });
-    }
-  
-    const command = new PutObjectCommand({
-      Bucket: process.env.S3_BUCKET_NAME,
-      Key: filename,
-      ContentType: type
-    });
-  
-    try {
-      const url = await getSignedUrl(s3, command, { expiresIn: 60 });
-      res.json({ url }); 
-    } catch (err) {
-      console.error("Presign error:", err);
-      res.status(500).json({ error: "Failed to generate S3 URL" }); 
-    }
+  const { filename, type } = req.query;
+
+  if (!filename || !type) {
+    return res.status(400).json({ error: "Missing filename or type" });
+  }
+
+  if (!process.env.S3_BUCKET_NAME) {
+    console.error("S3_BUCKET_NAME is not defined");
+    return res.status(500).json({ error: "Bucket name not configured" });
+  }
+
+  const command = new PutObjectCommand({
+    Bucket: process.env.S3_BUCKET_NAME,
+    Key: filename,
+    ContentType: type
   });
-  
+
+  try {
+    const url = await getSignedUrl(s3, command, { expiresIn: 60 });
+    res.json({ url });
+  } catch (err) {
+    console.error("Presign error:", err);
+    res.status(500).json({ error: "Failed to generate S3 URL" });
+  }
+});
 
 module.exports = router;
