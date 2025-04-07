@@ -1,3 +1,4 @@
+
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -7,15 +8,16 @@ const path = require('path');
 const fs = require('fs');
 const fetch = require('node-fetch');
 const { URL } = require('url');
-
+const s3Routes = require('./routes/s3');
 const app = express();
 app.use(express.json());
 app.use(cors());
+app.use('/s3', s3Routes);
 
 // Serve uploads folder
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
+  fs.mkdirSync(uploadDir); 
   console.log(`Created uploads dir: ${uploadDir}`);
 }
 app.use('/uploads', express.static(uploadDir));

@@ -28,7 +28,7 @@ if (!REACT_APP_SERVER_URL) {
 
 const CleanerInterface = () => {
   const navigation = useNavigation();
-  const SERVER_URL = REACT_APP_SERVER_URL || 'https://f547-86-40-74-78.ngrok-free.app';
+  const SERVER_URL = REACT_APP_SERVER_URL; 
 
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);

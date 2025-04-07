@@ -10,6 +10,8 @@
     "test": "jest"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.782.0",
+    "@aws-sdk/s3-request-presigner": "^3.782.0",
     "@react-native-async-storage/async-storage": "^1.24.0",
     "@react-native-community/geolocation": "^3.4.0",
     "@react-native-community/masked-view": "^0.1.11",

@@ -14,6 +14,7 @@ import {
   Animated,
   ScrollView,
 } from 'react-native';
+import { REACT_APP_SERVER_URL } from '@env';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import Geolocation from '@react-native-community/geolocation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -21,7 +22,8 @@ import { auth, signOut } from '../firebaseConfig';
 import { BleManager } from 'react-native-ble-plx';
 import base64 from 'react-native-base64';
 import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
-
+import { storage } from '../firebaseConfig';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import {
   REACT_APP_AZURE_CV_KEY,
   REACT_APP_AZURE_CV_ENDPOINT,
@@ -36,7 +38,7 @@ const CHARACTERISTIC_UUID_TX = 'b1a3511c-bbaa-416c-af55-d51cddce0e9f';
 const AZURE_CV_KEY = REACT_APP_AZURE_CV_KEY;
 const AZURE_CV_ENDPOINT = REACT_APP_AZURE_CV_ENDPOINT;
 const GOOGLE_MAPS_API_KEY = REACT_APP_GOOGLE_MAPS_API_KEY;
-const SERVER_URL = 'https://f547-86-40-74-78.ngrok-free.app';
+const SERVER_URL = REACT_APP_SERVER_URL;
 const CLUSTER_THRESHOLD = 5;
 const CLUSTER_RADIUS_METERS = 150;
 
@@ -838,83 +840,84 @@ const MapScreen = ({ navigation }) => {
     }
   }, []);
 
-
   const submitPhotoEvidence = useCallback(async () => {
     if (!photoEvidence || !photoEvidence.uri) {
       Alert.alert("Error", "No photo has been selected to submit.");
       return;
     }
     if (!selectedReport || !selectedReport._id) {
-      Alert.alert("Error", "No report is currently selected to attach the photo to.");
+      Alert.alert("Error", "No report is currently selected.");
       return;
     }
-    if (!SERVER_URL) {
-      Alert.alert("Configuration Error", "Server URL is not configured for uploads.");
-      setLastError("Server URL missing.");
-      return;
-    }
-
-    console.log(`Submitting photo for report ID: ${selectedReport._id}`);
+  
     setIsUploading(true);
     setLastError('');
-
-
-    const formData = new FormData();
-    formData.append('reportId', selectedReport._id);
-    formData.append('image', {
-      uri: Platform.OS === 'android'
-        ? photoEvidence.uri
-        : photoEvidence.uri.replace('file://', ''),
-      type: photoEvidence.type || 'image/jpeg',
-      name: photoEvidence.fileName || `report_${selectedReport._id}_${Date.now()}.jpg`,
-    });
-
+  
     try {
-      const response = await fetch(`${SERVER_URL}/report/upload`, {
-        method: 'POST',
-        body: formData,
-
-        headers: {
-          'Accept': 'application/json',
-
-        },
+      const response = await fetch(photoEvidence.uri);
+      const blob = await response.blob();
+  
+      const extension = photoEvidence.fileName?.split('.').pop() || 'jpg';
+      const fileType = photoEvidence.type || 'image/jpeg';
+      const filename = `reports/${selectedReport._id}_${Date.now()}.${extension}`;
+  
+      // 1. Get a presigned URL from your backend
+      const presignRes = await fetch(`${SERVER_URL}/s3/presign?filename=${filename}&type=${encodeURIComponent(fileType)}`);
+      const { url } = await presignRes.json();
+  
+      if (!presignRes.ok || !url) {
+        throw new Error("Failed to get S3 presigned URL");
+      }
+  
+      // 2. Upload to S3 using the presigned URL
+      const uploadRes = await fetch(url, {
+        method: 'PUT',
+        body: blob,
+        headers: { 'Content-Type': fileType }
       });
-
-      const responseData = await response.json();
-
-      if (response.ok && responseData.report) {
-
-        Alert.alert("Success", "Photo evidence uploaded and linked to the report!");
+  
+      if (!uploadRes.ok) {
+        throw new Error("Upload to S3 failed.");
+      }
+  
+      // 3. Extract the public URL
+      const imageUrl = url.split('?')[0];
+      console.log("S3 Upload success. Image URL:", imageUrl);
+  
+      // 4. PATCH image URL to backend
+      const responseUpdate = await fetch(`${SERVER_URL}/report/image/${selectedReport._id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl }),
+      });
+  
+      const responseData = await responseUpdate.json();
+  
+      if (responseUpdate.ok && responseData.report) {
+        Alert.alert("Success", "Photo evidence uploaded to S3 and saved.");
         const updatedReport = responseData.report;
-
-
+  
         setReports(prevReports =>
           prevReports.map(r => (r._id === updatedReport._id ? updatedReport : r))
-
         );
-
-
+  
         setSelectedReport(updatedReport);
         setPhotoEvidence(null);
-
-
       } else {
-
-        const errorMessage = responseData.error || `Upload failed with status ${response.status}`;
-        console.error("Photo upload error:", errorMessage, responseData);
-        Alert.alert("Upload Failed", `Could not upload photo: ${errorMessage}`);
-        setLastError(`Photo upload failed: ${errorMessage}`);
+        const errorMessage = responseData.error || `Server responded with ${responseUpdate.status}`;
+        throw new Error(errorMessage);
       }
+  
     } catch (error) {
-
-      console.error("Network error during photo upload:", error);
-      Alert.alert("Upload Failed", `A network error occurred while uploading: ${error.message}`);
-      setLastError(`Network error: ${error.message}`);
+      console.error("S3 Upload Failed:", error);
+      Alert.alert("Upload Failed", error.message);
+      setLastError(`Upload error: ${error.message}`);
     } finally {
       setIsUploading(false);
     }
   }, [photoEvidence, selectedReport, SERVER_URL]);
-
+  
+  
 
   const handleRemoveImage = useCallback(async () => {
     if (!selectedReport?._id) {
