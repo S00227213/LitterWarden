@@ -254,46 +254,57 @@ app.get('/reports', async (req, res) => {
   }
 });
 
-// PATCH /report/image/:id: Update report with image URL and trigger analysis
 app.patch('/report/image/:id', async (req, res) => {
   const reportId = req.params.id;
   const { imageUrl } = req.body;
 
+  console.log(`--> Received PATCH request for report ${reportId} with imageUrl: ${imageUrl}`);
+
   if (!reportId || !mongoose.Types.ObjectId.isValid(reportId)) {
+    console.error("PATCH /report/image - Invalid report ID:", reportId);
     return res.status(400).json({ error: 'Invalid report ID.' });
   }
   if (!imageUrl || typeof imageUrl !== 'string' || !imageUrl.startsWith('https://')) {
-    return res.status(400).json({ error: 'Missing or invalid S3 image URL.' });
+    console.error("PATCH /report/image - Missing or invalid S3 imageUrl in body for report:", reportId, "Body:", req.body);
+    return res.status(400).json({ error: 'Missing or invalid S3 image URL in request body.' });
   }
 
   try {
-    let updatedReport = await Report.findByIdAndUpdate(
+    // --- Step 1: Ensure the report exists ---
+    const reportExists = await Report.findById(reportId);
+    if (!reportExists) {
+         console.error(`PATCH /report/image - Report ${reportId} not found.`);
+         return res.status(404).json({ error: 'Report not found.' });
+    }
+
+    console.log(`PATCH /report/image - Report ${reportId} found. Step 2: Triggering Azure analysis for URL: ${imageUrl}`);
+
+    // --- Step 2: Perform Azure Analysis ---
+    const analysisResult = await analyzeImageWithAzure(imageUrl);
+    console.log(`PATCH /report/image - Azure analysis completed for ${reportId}. Result: ${analysisResult}`);
+
+    // --- Step 3: Update the report in DB with URL and Azure Result ---
+     console.log(`PATCH /report/image - Step 3: Updating DB for ${reportId} with URL and Azure result...`);
+    const updatedReport = await Report.findByIdAndUpdate(
         reportId,
-        { $set: { imageUrl: imageUrl, recognizedCategory: 'Analysis Pending...' } },
+        { $set: { imageUrl: imageUrl, recognizedCategory: analysisResult } },
         { new: true }
     );
 
     if (!updatedReport) {
-        return res.status(404).json({ error: 'Report not found.' });
+        console.error(`PATCH /report/image - Report ${reportId} not found during final update.`);
+        return res.status(404).json({ error: 'Report not found during final update after analysis.' });
     }
 
-    analyzeImageWithAzure(imageUrl).then(async (analysisResult) => {
-        try {
-            await Report.findByIdAndUpdate(reportId, { $set: { recognizedCategory: analysisResult } });
-            console.log(`Azure analysis updated for ${reportId}`);
-        } catch (analysisUpdateError) {
-            console.error(`Error updating report ${reportId} with Azure result:`, analysisUpdateError);
-        }
-    }).catch(azureError => {
-        console.error(`Async Azure analysis error for ${reportId}:`, azureError);
-         Report.findByIdAndUpdate(reportId, { $set: { recognizedCategory: 'Analysis Failed' } }).exec();
-    });
-
-    res.json({ message: 'Report image URL saved, analysis started.', report: updatedReport });
+    console.log(`PATCH /report/image - Report ${reportId} fully updated.`);
+    res.json({ message: 'Report image saved and analyzed!', report: updatedReport });
 
   } catch (error) {
-    console.error(`PATCH /report/image/:id error:`, error);
-    res.status(500).json({ error: 'Internal server error.', details: error.message });
+    console.error(`PATCH /report/image - Error processing report ${reportId}:`, error);
+    if (error.message.includes('Azure') || error.message.includes('Analysis')) {
+        await Report.findByIdAndUpdate(reportId, { $set: { recognizedCategory: 'Analysis Error' } }).exec();
+    }
+    res.status(500).json({ error: 'Internal server error during report image processing.', details: error.message });
   }
 });
 
