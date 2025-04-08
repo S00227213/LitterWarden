@@ -28,7 +28,7 @@ if (!REACT_APP_SERVER_URL) {
 
 const CleanerInterface = () => {
   const navigation = useNavigation();
-  const SERVER_URL = REACT_APP_SERVER_URL; 
+  const SERVER_URL = REACT_APP_SERVER_URL;
 
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -54,7 +54,8 @@ const CleanerInterface = () => {
         setReports([]);
         setCurrentPage(0);
         setError('User not logged in.');
-
+        // Optional: Redirect to login if needed
+        // navigation.navigate('Login');
       }
     });
     return () => unsubscribe();
@@ -67,7 +68,7 @@ const CleanerInterface = () => {
         setReports([]);
         return;
     }
-    if (!SERVER_URL || SERVER_URL === 'https://backup-default-url.example.com') {
+    if (!SERVER_URL) {
       console.error("[CleanerIF] Server URL not configured.");
       setError('Configuration Error: Server URL missing.');
       setLoading(false);
@@ -78,50 +79,55 @@ const CleanerInterface = () => {
     setLoading(true);
     setError('');
     try {
-      const url = `${SERVER_URL}/reports?includeClean=false&limit=500`;
+      const url = `${SERVER_URL}/reports?includeClean=false&limit=500`; // Fetch all pending reports
       console.log("[CleanerIF] Fetch URL:", url);
       const response = await fetch(url);
       console.log("[CleanerIF] HTTP status:", response.status);
 
       if (!response.ok) {
          const errorBody = await response.text();
-         throw new Error(`HTTP error ${response.status}: ${errorBody.substring(0, 100)}`);
+         let detail = errorBody;
+         try { detail = JSON.parse(errorBody).error || errorBody; } catch(e){}
+         throw new Error(`HTTP error ${response.status}: ${detail.substring(0, 150)}`);
       }
 
       const data = await response.json();
       const sortedData = (Array.isArray(data) ? data : [])
-                           .filter(report => !report.isClean)
+                           .filter(report => !report.isClean) // Double ensure clean reports are filtered
                            .sort((a, b) => {
                              const priorityOrder = { high: 3, medium: 2, low: 1 };
+                             // Sort by priority first (descending)
                              if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
                                return priorityOrder[b.priority] - priorityOrder[a.priority];
                              }
+                             // Then sort by date (most recent first)
                              return new Date(b.reportedAt) - new Date(a.reportedAt);
                            });
 
       setReports(sortedData);
-      setCurrentPage(0);
+      setCurrentPage(0); // Reset to first page after fetching
     } catch (err) {
       console.error("[CleanerIF] Fetch error:", err);
       setError(`Failed to fetch reports: ${err.message}`);
-      setReports([]);
+      setReports([]); // Clear reports on error
     } finally {
       setLoading(false);
       console.log("[CleanerIF] Fetch complete.");
     }
-  }, [userEmail, SERVER_URL]);
+  }, [userEmail, SERVER_URL]); // Dependency on userEmail and SERVER_URL
 
   useFocusEffect(
     React.useCallback(() => {
       console.log("[CleanerIF] Screen focused.");
       if (userEmail) {
-          fetchPendingReports();
+          fetchPendingReports(); // Fetch reports when screen comes into focus and user is logged in
       } else {
+          // Clear state if user logs out while navigating away and back
           setReports([]);
           setCurrentPage(0);
           setLoading(false);
       }
-    }, [userEmail, fetchPendingReports])
+    }, [userEmail, fetchPendingReports]) // Re-run if userEmail or fetch function changes
   );
 
   const handleMarkClean = async () => {
@@ -129,13 +135,17 @@ const CleanerInterface = () => {
       Alert.alert("Error", "No report selected.");
       return;
     }
-    if (!SERVER_URL || SERVER_URL === 'https://backup-default-url.example.com') {
+    if (!SERVER_URL) {
       Alert.alert('Configuration Error', 'Server URL not configured.');
       return;
     }
 
     if (afterPhoto) {
-        console.log("[CleanerIF] Placeholder: Would upload 'after' photo now for report:", selectedReport._id);
+        // Placeholder: In a real scenario, upload afterPhoto to S3 here *before* marking clean.
+        // This would involve getting a presigned URL, uploading, then potentially passing
+        // the new URL to the /report/clean endpoint if the backend needs it.
+        // For now, we just proceed with marking clean.
+        console.log("[CleanerIF] 'After' photo exists, but upload is not implemented. Proceeding to mark clean.");
     }
 
     Alert.alert(
@@ -153,27 +163,28 @@ const CleanerInterface = () => {
               console.log("[CleanerIF] Marking clean URL:", url, " ID:", selectedReport._id);
               const response = await fetch(url, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify({ reportId: selectedReport._id }),
               });
 
               if (response.ok) {
                 Alert.alert('Success', 'Report marked as clean.');
 
+                // Update state optimistically or based on response
                 setReports(prevReports => {
                     const updated = prevReports.filter(r => r._id !== selectedReport._id);
-
-                    const total = Math.ceil(updated.length / itemsPerPage);
-                    if (currentPage >= total && total > 0) {
-                        setCurrentPage(total - 1);
+                    // Adjust current page if the last item on it was removed
+                    const totalPagesAfter = Math.ceil(updated.length / itemsPerPage);
+                    if (currentPage >= totalPagesAfter && totalPagesAfter > 0) {
+                        setCurrentPage(totalPagesAfter - 1);
                     } else if (updated.length === 0) {
                         setCurrentPage(0);
                     }
                     return updated;
                 });
-                handleCloseModal();
+                handleCloseModal(); // Close modal on success
               } else {
-                const errorData = await response.json();
+                const errorData = await response.json().catch(() => ({ error: 'Failed to parse error response' }));
                 console.error("[CleanerIF] Mark clean failed:", response.status, errorData);
                 throw new Error(errorData.error || `Server error ${response.status}`);
               }
@@ -192,7 +203,7 @@ const CleanerInterface = () => {
   };
 
    const pickAfterImage = useCallback(() => {
-    const options = { mediaType: 'photo', quality: 0.7, maxWidth: 1024, maxHeight: 1024 };
+    const options = { mediaType: 'photo', quality: 0.7, maxWidth: 1024, maxHeight: 1024, saveToPhotos: false };
     Alert.alert(
       "Select 'After' Photo Source",
       "Take or select a photo of the cleaned area.",
@@ -202,7 +213,7 @@ const CleanerInterface = () => {
         { text: "Cancel", style: "cancel" },
       ]
     );
-  }, []);
+  }, [handleImagePickerResponse]);
 
   const handleImagePickerResponse = useCallback((response) => {
     if (response.didCancel) {
@@ -212,13 +223,13 @@ const CleanerInterface = () => {
       Alert.alert("Image Error", response.errorMessage);
     } else if (response.assets && response.assets.length > 0) {
       console.log("After photo selected:", response.assets[0].uri);
-      setAfterPhoto(response.assets[0]);
+      setAfterPhoto(response.assets[0]); // Store the full asset object
     }
   }, []);
 
   const handleSelectReport = (report) => {
     setSelectedReport(report);
-    setAfterPhoto(null);
+    setAfterPhoto(null); // Reset after photo when selecting a new report
     setIsModalVisible(true);
   };
 
@@ -226,10 +237,11 @@ const CleanerInterface = () => {
     setIsModalVisible(false);
     setSelectedReport(null);
     setAfterPhoto(null);
-    setIsSubmitting(false);
+    setIsSubmitting(false); // Reset submitting state
   };
 
 
+  // Calculate reports for the current page
   const currentReports = reports.slice(
     currentPage * itemsPerPage,
     (currentPage + 1) * itemsPerPage
@@ -237,7 +249,7 @@ const CleanerInterface = () => {
   const totalPages = Math.ceil(reports.length / itemsPerPage);
 
 
-
+  // Component to render each report card
   const renderReportItem = ({ item }) => {
     const lat = parseFloat(item.latitude);
     const lon = parseFloat(item.longitude);
@@ -301,6 +313,7 @@ const CleanerInterface = () => {
     );
   };
 
+  // Component to render the details modal
    const renderDetailModal = () => {
     if (!isModalVisible || !selectedReport) return null;
 
@@ -433,6 +446,7 @@ const CleanerInterface = () => {
     );
   };
 
+  // Main component render
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1E1E1E" />

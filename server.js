@@ -15,32 +15,40 @@ app.use(express.json());
 app.use(cors());
 app.use('/s3', s3Routes);
 
-// --- Environment Variables ---
 const MONGO_URI = process.env.MONGO_URI;
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const AZURE_CV_KEY = process.env.AZURE_CV_KEY;
 const AZURE_CV_ENDPOINT = process.env.AZURE_CV_ENDPOINT;
 const S3_BUCKET_NAME = process.env.S3_BUCKET_NAME;
 const AWS_REGION = process.env.AWS_REGION;
+const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
+const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
 
-// --- Validation ---
 if (!MONGO_URI) { console.error("FATAL: MONGO_URI missing."); process.exit(1); }
 if (!GOOGLE_MAPS_API_KEY) { console.warn("Warning: GOOGLE_MAPS_API_KEY missing."); }
 if (!AZURE_CV_KEY || !AZURE_CV_ENDPOINT) { console.warn("Warning: AZURE vars missing."); }
 if (!S3_BUCKET_NAME) { console.warn("Warning: S3_BUCKET_NAME missing."); }
 if (!AWS_REGION) { console.warn("Warning: AWS_REGION missing."); }
+if (!AWS_ACCESS_KEY_ID) { console.warn("Warning: AWS_ACCESS_KEY_ID missing."); }
+if (!AWS_SECRET_ACCESS_KEY) { console.warn("Warning: AWS_SECRET_ACCESS_KEY missing."); }
 
-// --- AWS S3 Client Setup ---
+
 let s3Client;
-if (AWS_REGION && S3_BUCKET_NAME) {
-  s3Client = new S3Client({ region: AWS_REGION });
+if (AWS_REGION && S3_BUCKET_NAME && AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY) {
+  s3Client = new S3Client({
+    region: AWS_REGION,
+    credentials: {
+       accessKeyId: AWS_ACCESS_KEY_ID,
+       secretAccessKey: AWS_SECRET_ACCESS_KEY,
+    }
+  });
   console.log(`S3 Client configured for region: ${AWS_REGION}`);
 } else {
-  console.warn("S3 Client not configured due to missing AWS_REGION or S3_BUCKET_NAME.");
+  console.warn("S3 Client not configured due to missing AWS config (Region, Bucket, AccessKey, or SecretKey).");
   s3Client = null;
 }
 
-// --- MongoDB Connection ---
+
 const connectDB = async () => {
   try {
     await mongoose.connect(MONGO_URI);
@@ -52,7 +60,7 @@ const connectDB = async () => {
 };
 connectDB();
 
-// --- Mongoose Schema & Model ---
+
 const reportSchema = new mongoose.Schema({
   latitude: { type: Number, required: true, index: true },
   longitude: { type: Number, required: true, index: true },
@@ -62,15 +70,13 @@ const reportSchema = new mongoose.Schema({
   priority: { type: String, enum: ['low', 'medium', 'high'], required: true },
   email: { type: String, required: true, lowercase: true, trim: true, index: true },
   reportedAt: { type: Date, default: Date.now, index: true },
-  imageUrl: { type: String, trim: true, default: null }, // S3 URL
+  imageUrl: { type: String, trim: true, default: null },
   recognizedCategory: { type: String, trim: true, default: 'Analysis Pending' },
   isClean: { type: Boolean, default: false, index: true },
 });
 const Report = mongoose.model('Report', reportSchema, 'reports');
 
-// --- Helper Functions ---
 
-// Server-side Geocoding
 const getAddressFromCoordsServer = async (latitude, longitude) => {
     if (!GOOGLE_MAPS_API_KEY) {
     console.warn("No API key for geocoding.");
@@ -104,7 +110,7 @@ const getAddressFromCoordsServer = async (latitude, longitude) => {
   }
 };
 
-// Azure Computer Vision Analysis
+
 const analyzeImageWithAzure = async (imageUrl) => {
     if (!AZURE_CV_KEY || !AZURE_CV_ENDPOINT || !imageUrl) {
     console.warn('Skipping Azure analysis. Missing config or URL.');
@@ -157,36 +163,44 @@ const analyzeImageWithAzure = async (imageUrl) => {
   }
 };
 
-// Function to delete S3 object
+
 const deleteS3Object = async (imageUrl) => {
     if (!s3Client) {
         console.warn("S3 Client not available. Skipping S3 deletion.");
         return false;
     }
-    if (!imageUrl || !(imageUrl.includes('s3.amazonaws.com') || imageUrl.includes(S3_BUCKET_NAME))) {
-        console.log("Invalid S3 URL or bucket name missing. Skipping S3 deletion.");
-        return false;
-    }
 
+    let key = '';
     try {
-        const parsedUrl = new URL(imageUrl);
-        const key = decodeURIComponent(parsedUrl.pathname.substring(1));
-        const bucket = S3_BUCKET_NAME;
+        const s3UrlPattern1 = `https://${S3_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/`;
+        const s3UrlPattern2 = `https://s3.${AWS_REGION}.amazonaws.com/${S3_BUCKET_NAME}/`;
 
+        if (imageUrl && typeof imageUrl === 'string') {
+            if (imageUrl.startsWith(s3UrlPattern1)) {
+                key = decodeURIComponent(imageUrl.substring(s3UrlPattern1.length));
+            } else if (imageUrl.startsWith(s3UrlPattern2)) {
+                 key = decodeURIComponent(imageUrl.substring(s3UrlPattern2.length));
+            }
+        }
+
+        if (!key) {
+            console.log(`URL "${imageUrl}" does not appear to be a valid S3 URL for bucket ${S3_BUCKET_NAME} in region ${AWS_REGION}. Skipping S3 deletion.`);
+            return false;
+        }
+
+        const bucket = S3_BUCKET_NAME;
         console.log(`Attempting to delete S3 object: Bucket=${bucket}, Key=${key}`);
         const deleteCommand = new DeleteObjectCommand({ Bucket: bucket, Key: key });
         await s3Client.send(deleteCommand);
         console.log(`S3 object deleted successfully: ${key}`);
         return true;
     } catch (s3DeleteError) {
-        console.error(`Error deleting S3 object ${imageUrl}:`, s3DeleteError);
+        console.error(`Error deleting S3 object ${imageUrl} (Key: ${key}):`, s3DeleteError);
         return false;
     }
 };
 
-// --- API Routes ---
 
-// POST /report: Create a new report
 app.post('/report', async (req, res) => {
    try {
     let { latitude, longitude, town, county, country, priority, email } = req.body;
@@ -228,7 +242,7 @@ app.post('/report', async (req, res) => {
   }
 });
 
-// GET /reports: Retrieve reports
+
 app.get('/reports', async (req, res) => {
     try {
     const { email, page = 1, limit = 50, includeClean = 'false' } = req.query;
@@ -238,9 +252,13 @@ app.get('/reports', async (req, res) => {
 
     const pageNum = parseInt(page, 10);
     const limitNum = parseInt(limit, 10);
-    if (isNaN(pageNum) || pageNum < 1 || isNaN(limitNum) || limitNum < 1 || limitNum > 200) {
-        return res.status(400).json({ error: 'Invalid page or limit parameters.' });
+
+    const MAX_LIMIT = 1000;
+    if (isNaN(pageNum) || pageNum < 1 || isNaN(limitNum) || limitNum < 1 || limitNum > MAX_LIMIT) {
+        console.error(`GET /reports - Invalid page or limit (Max Limit: ${MAX_LIMIT}):`, { page, limit });
+        return res.status(400).json({ error: `Invalid page or limit parameters (limit must be 1-${MAX_LIMIT}).` });
     }
+
 
     const reports = await Report.find(filter)
       .sort({ reportedAt: -1 })
@@ -270,7 +288,7 @@ app.patch('/report/image/:id', async (req, res) => {
   }
 
   try {
-    // --- Step 1: Ensure the report exists ---
+
     const reportExists = await Report.findById(reportId);
     if (!reportExists) {
          console.error(`PATCH /report/image - Report ${reportId} not found.`);
@@ -279,11 +297,11 @@ app.patch('/report/image/:id', async (req, res) => {
 
     console.log(`PATCH /report/image - Report ${reportId} found. Step 2: Triggering Azure analysis for URL: ${imageUrl}`);
 
-    // --- Step 2: Perform Azure Analysis ---
+
     const analysisResult = await analyzeImageWithAzure(imageUrl);
     console.log(`PATCH /report/image - Azure analysis completed for ${reportId}. Result: ${analysisResult}`);
 
-    // --- Step 3: Update the report in DB with URL and Azure Result ---
+
      console.log(`PATCH /report/image - Step 3: Updating DB for ${reportId} with URL and Azure result...`);
     const updatedReport = await Report.findByIdAndUpdate(
         reportId,
@@ -308,7 +326,7 @@ app.patch('/report/image/:id', async (req, res) => {
   }
 });
 
-// PATCH /report/clean: Mark a report as cleaned
+
 app.patch('/report/clean', async (req, res) => {
    try {
     const { reportId } = req.body;
@@ -336,7 +354,7 @@ app.patch('/report/clean', async (req, res) => {
   }
 });
 
-// DELETE /report/:id: Delete a report entirely
+
 app.delete('/report/:id', async (req, res) => {
    try {
     const reportId = req.params.id;
@@ -359,28 +377,36 @@ app.delete('/report/:id', async (req, res) => {
   }
 });
 
-// DELETE /report/image/:id: Delete ONLY the image
+
 app.delete('/report/image/:id', async (req, res) => {
    try {
     const reportId = req.params.id;
     if (!mongoose.Types.ObjectId.isValid(reportId)) {
         return res.status(400).json({ error: 'Invalid report ID format.' });
     }
+    console.log(`DELETE /report/image/:id - Request for report: ${reportId}`);
 
     const report = await Report.findById(reportId);
     if (!report) {
+        console.log(`DELETE /report/image/:id - Report ${reportId} not found.`);
         return res.status(404).json({ error: 'Report not found.' });
     }
     if (!report.imageUrl) {
+        console.log(`DELETE /report/image/:id - Report ${reportId} has no image URL.`);
         return res.status(400).json({ error: 'Report does not have an image to delete.' });
     }
 
+    console.log(`DELETE /report/image/:id - Attempting S3 deletion for URL: ${report.imageUrl}`);
     const s3DeletionSuccess = await deleteS3Object(report.imageUrl);
 
-    if (!s3DeletionSuccess) {
-        console.warn(`S3 deletion failed or skipped for ${report.imageUrl}, proceeding to update DB.`);
+    if (s3DeletionSuccess) {
+         console.log(`DELETE /report/image/:id - S3 object potentially deleted for ${report.imageUrl}.`);
+    } else {
+        console.warn(`DELETE /report/image/:id - S3 deletion failed or was skipped for ${report.imageUrl}. Proceeding to update DB.`);
     }
 
+
+    console.log(`DELETE /report/image/:id - Updating DB for report ${reportId} to remove image URL.`);
     const updatedReport = await Report.findByIdAndUpdate(
       reportId,
       { $set: { imageUrl: null, recognizedCategory: 'Analysis Pending' } },
@@ -388,23 +414,25 @@ app.delete('/report/image/:id', async (req, res) => {
     );
 
     if (!updatedReport) {
-      return res.status(404).json({ error: 'Report not found during database update.' });
+
+      console.error(`DELETE /report/image/:id - Report ${reportId} not found during final DB update.`);
+      return res.status(404).json({ error: 'Report found initially but failed during database update.' });
     }
 
-    console.log(`Image URL cleared for report ${reportId}.`);
+    console.log(`Image URL cleared from DB for report ${reportId}.`);
     res.json({ message: 'Image removed successfully!', report: updatedReport });
 
   } catch (error) {
-    console.error('DELETE /report/image/:id error:', error);
+    console.error('DELETE /report/image/:id - Unexpected error:', error);
     res.status(500).json({ error: 'Internal server error while deleting report image.', details: error.message });
   }
 });
 
-// --- Root Route ---
+
 app.get('/', (req, res) => {
   res.send('LitterWarden Server is running!');
 });
 
-// --- Start Server ---
+
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

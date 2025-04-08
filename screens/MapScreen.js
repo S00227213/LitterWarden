@@ -300,6 +300,7 @@ const MapScreen = ({ navigation }) => {
         Animated.timing(animatedOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
       ]).start();
     } else {
+
       Animated.parallel([
         Animated.timing(animatedScale, { toValue: 0.9, duration: 200, useNativeDriver: true }),
         Animated.timing(animatedOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
@@ -340,6 +341,7 @@ const MapScreen = ({ navigation }) => {
           { title: "Location Permission", message: "LitterWarden needs access.", buttonPositive: "OK" }
         ) === PermissionsAndroid.RESULTS.GRANTED;
       } else {
+
         const status = await Geolocation.requestAuthorization('whenInUse');
         granted = status === 'granted';
       }
@@ -452,7 +454,7 @@ const MapScreen = ({ navigation }) => {
     bleManager.startDeviceScan([SERVICE_UUID], null, (error, device) => {
       if (error) {
 
-        if (![601, 2, 5 ].includes(error.errorCode)) {
+        if (![601, 2, 5].includes(error.errorCode)) {
           console.error("BLE Scan Error:", error.errorCode, error.message);
           setLastError(`BLE Scan Error: ${error.message}`);
         }
@@ -540,12 +542,11 @@ const MapScreen = ({ navigation }) => {
           console.error(`Error monitoring characteristic ${CHARACTERISTIC_UUID_TX}:`, error.errorCode, error.message);
           setLastError(`Monitor Error: ${error.message}`);
 
-          if (error.errorCode === 201 ||
-              error.errorCode === 205 ||
-              error.message.toLowerCase().includes("disconnect")) {
+          if (error.errorCode === 201 || error.errorCode === 205 || error.message.toLowerCase().includes("disconnect")) {
 
-             console.log("Monitoring stopped due to disconnection.");
+             console.log("Monitoring stopped due to disconnection or error.");
              setEsp32Connected(false);
+
           } else {
 
              setEsp32Connected(false);
@@ -575,6 +576,7 @@ const MapScreen = ({ navigation }) => {
               }
             } else {
               console.log("Received non-button data:", decodedValue);
+
             }
           } catch (decodeError) {
             console.error("Error decoding base64 BLE data:", decodeError);
@@ -583,6 +585,7 @@ const MapScreen = ({ navigation }) => {
         }
       }
     );
+
 
 
   }, [handleReport]);
@@ -609,22 +612,11 @@ const MapScreen = ({ navigation }) => {
 
         components.forEach((component) => {
           const types = component.types;
-
-          if (types.includes('locality')) {
-            town = component.long_name;
-          } else if (types.includes('postal_town') && !town) {
-            town = component.long_name;
-          }
-
-          if (types.includes('administrative_area_level_2')) {
-            county = component.long_name;
-          } else if (types.includes('administrative_area_level_1') && !county) {
-             county = component.long_name;
-          }
-
-          if (types.includes('country')) {
-            country = component.long_name;
-          }
+          if (types.includes('locality')) town = component.long_name;
+          else if (types.includes('postal_town') && !town) town = component.long_name;
+          if (types.includes('administrative_area_level_2')) county = component.long_name;
+          else if (types.includes('administrative_area_level_1') && !county) county = component.long_name;
+          if (types.includes('country')) country = component.long_name;
         });
 
 
@@ -673,7 +665,6 @@ const MapScreen = ({ navigation }) => {
 
     let currentLocationToReport = location;
     if (!currentLocationToReport) {
-
       try {
         const storedLocationJson = await AsyncStorage.getItem('lastKnownLocation');
         if (storedLocationJson) {
@@ -686,7 +677,7 @@ const MapScreen = ({ navigation }) => {
     }
 
 
-    if (!currentLocationToReport || !currentLocationToReport.latitude || !currentLocationToReport.longitude) {
+    if (!currentLocationToReport || typeof currentLocationToReport.latitude !== 'number' || typeof currentLocationToReport.longitude !== 'number') {
       Alert.alert('Location Unavailable', 'Cannot determine your current location to submit the report. Please ensure location services are enabled and try again.');
       setLastError('Location unavailable for reporting.');
       return;
@@ -728,11 +719,7 @@ const MapScreen = ({ navigation }) => {
         console.log("Report successfully submitted:", responseData.report);
         Alert.alert('Report Sent', `Your ${priority} priority litter report has been submitted successfully.`);
 
-        setReports((prevReports) =>
-          [responseData.report, ...prevReports]
-
-        );
-
+        setReports((prevReports) => [responseData.report, ...prevReports]);
 
       } else {
 
@@ -756,22 +743,22 @@ const MapScreen = ({ navigation }) => {
   const handleManualReport = useCallback(async () => {
     let locationAvailable = !!location;
 
-    if (!locationAvailable) {
 
+    if (!locationAvailable) {
       try {
         const storedLocationJson = await AsyncStorage.getItem('lastKnownLocation');
         if (storedLocationJson) {
           const storedLocation = JSON.parse(storedLocationJson);
-          if (storedLocation.latitude && storedLocation.longitude) {
+          if (typeof storedLocation.latitude === 'number' && typeof storedLocation.longitude === 'number') {
             locationAvailable = true;
 
-             setLocation(storedLocation);
           }
         }
       } catch (e) {
         console.error("Error checking stored location for manual report:", e);
       }
     }
+
 
     if (!locationAvailable) {
       Alert.alert(
@@ -827,13 +814,11 @@ const MapScreen = ({ navigation }) => {
       Alert.alert("Image Picker Error", `Could not select image: ${response.errorMessage}`);
       return;
     }
-    if (response.assets && response.assets.length > 0 && response.assets[0].uri) {
 
+    if (response.assets && response.assets.length > 0 && response.assets[0].uri) {
       const selectedAsset = response.assets[0];
       console.log("Image selected:", selectedAsset.uri);
-
       setPhotoEvidence(selectedAsset);
-
     } else {
         console.warn("Image picker response did not contain a valid asset.", response);
         Alert.alert("Image Error", "Could not get a valid image file.");
@@ -854,146 +839,96 @@ const MapScreen = ({ navigation }) => {
         setLastError("Frontend Config Error: SERVER_URL missing.");
         return;
     }
-  
+
     setIsUploading(true);
     setLastError('');
     console.log(`Starting photo evidence submission for report ${selectedReport._id}`);
-  
+
     try {
-      // --- Step 0: Get the image data as a blob ---
+
       console.log("Fetching image blob from:", photoEvidence.uri);
       const response = await fetch(photoEvidence.uri);
-      if (!response.ok) {
-          throw new Error(`Failed to fetch local image file: Status ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`Failed to fetch local image file: Status ${response.status}`);
       const blob = await response.blob();
-      console.log("Image blob fetched successfully. Size:", blob.size, "Type:", blob.type);
-  
+      console.log("Image blob fetched. Size:", blob.size, "Type:", blob.type);
+
       const extension = photoEvidence.fileName?.split('.').pop()?.toLowerCase() || 'jpg';
-      // Use blob.type if available and seems valid, otherwise fallback based on extension or default
       const fileType = blob.type && blob.type.startsWith('image/') ? blob.type : (photoEvidence.type || 'image/jpeg');
       const filename = `reports/${selectedReport._id}_${Date.now()}.${extension}`;
       console.log(`Prepared filename: ${filename}, type: ${fileType}`);
-  
-      // --- Step 1: Get a presigned URL from your backend ---
+
+
       const presignUrlEndpoint = `${SERVER_URL}/s3/presign?filename=${encodeURIComponent(filename)}&type=${encodeURIComponent(fileType)}`;
       console.log("Requesting presigned URL from:", presignUrlEndpoint);
-  
       const presignRes = await fetch(presignUrlEndpoint);
-  
-      // --- !!! IMPORTANT ERROR HANDLING !!! ---
+
       if (!presignRes.ok) {
-        const errorText = await presignRes.text(); // Read the response as text
-        console.error("--------------------------------------------------");
-        console.error("Fetching Presigned URL FAILED! Status:", presignRes.status);
-        console.error("Raw Server Response Text:");
-        console.error(errorText); // Log the raw response (could be HTML)
-        console.error("--------------------------------------------------");
-  
-        // Try to provide a more specific error message if possible
-        let detailedError = `Failed to get S3 presigned URL. Server responded with status ${presignRes.status}.`;
-        if (errorText.toLowerCase().includes('bucket name not configured')) {
-            detailedError = "Server Error: S3 Bucket Name is not configured on the backend.";
-        } else if (errorText.toLowerCase().includes('access denied')) {
-            detailedError = "Server Error: AWS IAM permissions issue (Access Denied). Check backend logs/permissions.";
-        } else if (errorText.toLowerCase().includes('invalid access key id')) {
-            detailedError = "Server Error: Invalid AWS Access Key ID configured on the backend.";
-        } else if (presignRes.status === 500 && errorText.toLowerCase().includes('<html')) {
-             detailedError = `Server Error 500. The server returned an HTML error page instead of JSON. Check backend logs on Render.`;
-        }
-        // Add more specific checks based on common errors seen in logs
-  
-        throw new Error(detailedError); // Throw the error to be caught by the catch block
+        const errorText = await presignRes.text();
+        console.error("Fetching Presigned URL FAILED! Status:", presignRes.status, "Response:", errorText);
+        let detailedError = `Failed to get S3 presigned URL (Status ${presignRes.status}). Check server logs.`;
+
+        try {
+            const jsonError = JSON.parse(errorText);
+            if (jsonError.error) detailedError = `Server Error: ${jsonError.error}`;
+        } catch (e) {}
+        throw new Error(detailedError);
       }
-      // --- End of Important Error Handling ---
-  
-      // If we get here, presignRes.ok was true, proceed to parse JSON
+
       const presignData = await presignRes.json();
-      const { url: presignedUploadUrl } = presignData; // Destructure the URL
-  
-      if (!presignedUploadUrl) {
-        console.error("Presigned URL response missing 'url' field:", presignData);
-        throw new Error("Server responded successfully but did not provide a presigned URL.");
-      }
-      console.log("Successfully obtained presigned URL (first few chars):", presignedUploadUrl.substring(0, 100) + "...");
-  
-      // --- Step 2: Upload the image blob to S3 using the presigned URL ---
+      const { url: presignedUploadUrl } = presignData;
+      if (!presignedUploadUrl) throw new Error("Server did not provide a presigned URL.");
+      console.log("Got presigned URL.");
+
+
       console.log("Uploading image blob to S3...");
-      const uploadRes = await fetch(presignedUploadUrl, {
-        method: 'PUT',
-        body: blob,
-        headers: {
-          'Content-Type': fileType // Crucial header for S3 PUT via presigned URL
-        }
-      });
-  
+      const uploadRes = await fetch(presignedUploadUrl, { method: 'PUT', body: blob, headers: { 'Content-Type': fileType } });
+
       if (!uploadRes.ok) {
         const uploadErrorText = await uploadRes.text();
-        console.error("--------------------------------------------------");
-        console.error("S3 Upload FAILED! Status:", uploadRes.status);
-        console.error("S3 Response Text:", uploadErrorText);
-        console.error("--------------------------------------------------");
-        throw new Error(`Upload to S3 failed with status ${uploadRes.status}. Check S3 CORS/Permissions or presigned URL validity.`);
+        console.error("S3 Upload FAILED! Status:", uploadRes.status, "Response:", uploadErrorText);
+        throw new Error(`Upload to S3 failed (Status ${uploadRes.status}). Check S3 CORS/Permissions.`);
       }
-      console.log("S3 Upload successful. Status:", uploadRes.status);
-  
-      // --- Step 3: Extract the permanent public URL (optional, depends on bucket policy) ---
-      // The URL *before* the query string is usually the object's permanent URL if the object is public
+      console.log("S3 Upload successful.");
+
+
       const imageUrl = presignedUploadUrl.split('?')[0];
       console.log("Derived S3 Image URL:", imageUrl);
-  
-      // --- Step 4: PATCH the image URL back to your backend server ---
+
+
       const updateEndpoint = `${SERVER_URL}/report/image/${selectedReport._id}`;
-      console.log("Updating report with image URL via PATCH:", updateEndpoint);
+      console.log("Updating report via PATCH:", updateEndpoint);
       const responseUpdate = await fetch(updateEndpoint, {
-        method: 'PATCH', // Assuming your backend uses PATCH for this
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-         },
-        body: JSON.stringify({ imageUrl: imageUrl }), // Send the permanent URL
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ imageUrl: imageUrl }),
       });
-  
+
       const responseData = await responseUpdate.json();
-  
+
       if (responseUpdate.ok && responseData.report) {
         console.log("Backend update successful:", responseData.report);
         Alert.alert("Success", "Photo evidence uploaded and saved successfully!");
         const updatedReport = responseData.report;
-  
-        // Update local state
-        setReports(prevReports =>
-          prevReports.map(r => (r._id === updatedReport._id ? updatedReport : r))
-        );
-        setSelectedReport(updatedReport); // Update the currently viewed report
-        setPhotoEvidence(null); // Clear the temporary photo state
-  
+
+        setReports(prevReports => prevReports.map(r => (r._id === updatedReport._id ? updatedReport : r)));
+        setSelectedReport(updatedReport);
+        setPhotoEvidence(null);
       } else {
-        // Handle backend update failure
-        const errorMessage = responseData.error || `Backend update failed with status ${responseUpdate.status}`;
+        const errorMessage = responseData.error || `Backend update failed (Status ${responseUpdate.status})`;
         console.error("Backend update failed:", errorMessage, responseData);
-        // Inform the user, but the image IS in S3. Maybe offer a retry?
-        Alert.alert("Partial Success", `Image uploaded to S3, but failed to update report record: ${errorMessage}. Please try updating later or contact support.`);
-        // Optionally, keep the photoEvidence state so they don't have to re-select?
+        Alert.alert("Partial Success", `Image uploaded, but failed to update record: ${errorMessage}.`);
       }
-  
+
     } catch (error) {
-      // Catch errors from any step (fetch blob, get presigned URL, upload to S3, update backend)
-      console.error("--------------------------------------------------");
       console.error("Photo Evidence Submission FAILED:", error);
-      console.error("Error Name:", error.name);
-      console.error("Error Message:", error.message);
-      console.error("--------------------------------------------------");
       Alert.alert("Upload Failed", `An error occurred: ${error.message}`);
-      setLastError(`Upload error: ${error.message}`); // Update error state
+      setLastError(`Upload error: ${error.message}`);
     } finally {
-      // This block always runs, whether try succeeded or failed
-      setIsUploading(false); // Ensure loading indicator stops
+      setIsUploading(false);
       console.log("Photo evidence submission process finished.");
     }
-  }, [photoEvidence, selectedReport, SERVER_URL, setReports, setSelectedReport, setPhotoEvidence, setIsUploading, setLastError]); // Include all dependencies
-  
-  
+  }, [photoEvidence, selectedReport, SERVER_URL, setReports, setSelectedReport, setPhotoEvidence, setIsUploading, setLastError]);
+
 
   const handleRemoveImage = useCallback(async () => {
     if (!selectedReport?._id) {
@@ -1013,7 +948,7 @@ const MapScreen = ({ navigation }) => {
 
     Alert.alert(
       "Confirm Deletion",
-      "Are you sure you want to remove the photo evidence for this report?",
+      "Are you sure you want to remove the photo evidence for this report? This will also delete it from storage.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -1025,6 +960,7 @@ const MapScreen = ({ navigation }) => {
             setLastError('');
 
             try {
+
               const response = await fetch(`${SERVER_URL}/report/image/${selectedReport._id}`, {
                 method: 'DELETE',
                 headers: { 'Accept': 'application/json' },
@@ -1037,18 +973,12 @@ const MapScreen = ({ navigation }) => {
                 Alert.alert("Success", "Photo evidence has been removed.");
                 const updatedReport = responseData.report;
 
-
-                setReports(prevReports =>
-                  prevReports.map(r => (r._id === updatedReport._id ? updatedReport : r))
-                );
-
-
+                setReports(prevReports => prevReports.map(r => (r._id === updatedReport._id ? updatedReport : r)));
                 setSelectedReport(updatedReport);
                 setPhotoEvidence(null);
-
               } else {
 
-                const errorMessage = responseData.error || `Removal failed with status ${response.status}`;
+                const errorMessage = responseData.error || `Removal failed (Status ${response.status})`;
                 console.error("Image removal error:", errorMessage, responseData);
                 Alert.alert("Removal Failed", `Could not remove photo: ${errorMessage}`);
                 setLastError(`Image removal failed: ${errorMessage}`);
@@ -1084,6 +1014,7 @@ const MapScreen = ({ navigation }) => {
     setLastError('');
 
     try {
+
       const response = await fetch(`${SERVER_URL}/report/clean`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -1093,35 +1024,28 @@ const MapScreen = ({ navigation }) => {
       const responseData = await response.json();
 
       if (response.ok) {
-        Alert.alert("Success", "Report has been marked as cleaned.");
 
+        Alert.alert("Success", "Report has been marked as cleaned.");
         const cleanedReportId = selectedReport._id;
         const currentIndex = userMarkers.findIndex(r => r._id === cleanedReportId);
 
-
         setReports(prevReports => prevReports.filter(report => report._id !== cleanedReportId));
 
-
         const remainingUserMarkers = userMarkers.filter(report => report._id !== cleanedReportId);
-
         setPhotoEvidence(null);
 
         if (remainingUserMarkers.length === 0) {
-
           setShowPreviewModal(false);
           setSelectedReport(null);
           setSelectedMarkerIndex(null);
         } else {
-
-
-          const newIndex = Math.min(currentIndex, remainingUserMarkers.length - 1);
+          const newIndex = Math.min(Math.max(0, currentIndex -1), remainingUserMarkers.length - 1);
           setSelectedMarkerIndex(newIndex);
           setSelectedReport(remainingUserMarkers[newIndex]);
         }
-
       } else {
 
-        const errorMessage = responseData.error || `Failed with status ${response.status}`;
+        const errorMessage = responseData.error || `Failed to mark clean (Status ${response.status})`;
         throw new Error(errorMessage);
       }
     } catch (error) {
@@ -1131,12 +1055,13 @@ const MapScreen = ({ navigation }) => {
     } finally {
       setIsUploading(false);
     }
-  }, [selectedReport, reports, userEmail, userMarkers, SERVER_URL]);
+  }, [selectedReport, userMarkers, SERVER_URL]);
 
 
   const goToPreviousMarker = useCallback(() => {
-    if (!userMarkers || userMarkers.length <= 1 || selectedMarkerIndex === null || selectedMarkerIndex === 0) {
-      return;
+    if (!userMarkers || userMarkers.length <= 1 || selectedMarkerIndex === null || selectedMarkerIndex <= 0) {
+
+        return;
     }
     const newIndex = selectedMarkerIndex - 1;
     setSelectedMarkerIndex(newIndex);
@@ -1149,7 +1074,8 @@ const MapScreen = ({ navigation }) => {
 
   const goToNextMarker = useCallback(() => {
     if (!userMarkers || userMarkers.length <= 1 || selectedMarkerIndex === null || selectedMarkerIndex >= userMarkers.length - 1) {
-      return;
+
+        return;
     }
     const newIndex = selectedMarkerIndex + 1;
     setSelectedMarkerIndex(newIndex);
@@ -1178,10 +1104,7 @@ const MapScreen = ({ navigation }) => {
         setExpandedClusterId(null);
         AsyncStorage.removeItem('userEmail');
 
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'Home' }],
-        });
+        navigation.reset({ index: 0, routes: [{ name: 'Home' }], });
       })
       .catch((error) => {
         console.error('Logout Error:', error);
@@ -1397,28 +1320,16 @@ const MapScreen = ({ navigation }) => {
 
             <View style={styles.priorityModalContainer} onStartShouldSetResponder={() => true}>
               <Text style={styles.priorityModalHeader}>Select Report Priority</Text>
-              <TouchableOpacity
-                style={[styles.priorityButton, styles.lowPriority]}
-                onPress={() => handleReport('low')}
-              >
+              <TouchableOpacity style={[styles.priorityButton, styles.lowPriority]} onPress={() => handleReport('low')}>
                 <Text style={styles.priorityButtonText}>Low Priority</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.priorityButton, styles.mediumPriority]}
-                onPress={() => handleReport('medium')}
-              >
+              <TouchableOpacity style={[styles.priorityButton, styles.mediumPriority]} onPress={() => handleReport('medium')}>
                 <Text style={styles.priorityButtonText}>Medium Priority</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.priorityButton, styles.highPriority]}
-                onPress={() => handleReport('high')}
-              >
+              <TouchableOpacity style={[styles.priorityButton, styles.highPriority]} onPress={() => handleReport('high')}>
                 <Text style={styles.priorityButtonText}>High Priority</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.priorityButton, styles.cancelButton]}
-                onPress={() => setShowPriorityModal(false)}
-              >
+              <TouchableOpacity style={[styles.priorityButton, styles.cancelButton]} onPress={() => setShowPriorityModal(false)}>
                 <Text style={styles.priorityButtonText}>Cancel</Text>
               </TouchableOpacity>
             </View>
@@ -1442,6 +1353,17 @@ const MapScreen = ({ navigation }) => {
                 { transform: [{ scale: animatedScale }], opacity: animatedOpacity }
               ]}
             >
+
+              <TouchableOpacity
+                style={styles.modalTopCloseButton}
+                onPress={() => setShowPreviewModal(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                disabled={isUploading || isDeletingImage}
+              >
+                <Text style={styles.modalTopCloseButtonText}>×</Text>
+              </TouchableOpacity>
+
+
               <Text style={styles.modalHeader}>Report Details</Text>
 
               <ScrollView
@@ -1459,36 +1381,26 @@ const MapScreen = ({ navigation }) => {
 
                 <Text style={styles.modalText}>
                   Priority:{' '}
-                  <Text
-                    style={[
-                      styles.modalTextHighlight,
-
-                      styles[`priorityText${selectedReport.priority.charAt(0).toUpperCase() + selectedReport.priority.slice(1)}`],
-                    ]}
-                  >
+                  <Text style={[ styles.modalTextHighlight, styles[`priorityText${selectedReport.priority.charAt(0).toUpperCase() + selectedReport.priority.slice(1)}`], ]}>
                     {selectedReport.priority.toUpperCase()}
                   </Text>
                 </Text>
                 <Text style={styles.modalText} selectable={true}>
                   Location:{' '}
                   <Text style={styles.modalTextHighlight}>
-
                     {(selectedReport.town && !['Unknown', 'API Key Error', 'Lookup Failed', 'Network Error'].includes(selectedReport.town)) ? `${selectedReport.town}, ` : ''}
                     {(selectedReport.county && !['Unknown', 'API Key Error', 'Lookup Failed', 'Network Error'].includes(selectedReport.county)) ? `${selectedReport.county}` : (!selectedReport.town || ['Unknown', 'API Key Error', 'Lookup Failed', 'Network Error'].includes(selectedReport.town)) ? `(${selectedReport.latitude.toFixed(4)}, ${selectedReport.longitude.toFixed(4)})` : ''}
                     {(selectedReport.country && !['Unknown', 'API Key Error', 'Lookup Failed', 'Network Error'].includes(selectedReport.country)) ? `, ${selectedReport.country}` : ''}
-
                     {(selectedReport.town === 'API Key Error' || selectedReport.town === 'Lookup Failed' || selectedReport.town === 'Network Error') ? ` (${selectedReport.town})` : ''}
-
                   </Text>
                 </Text>
-                <Text style={styles.modalText}>
+                 <Text style={styles.modalText}>
                   Coords:{' '}
                   <Text style={styles.modalTextHighlight}>
                     {selectedReport.latitude.toFixed(5)}, {selectedReport.longitude.toFixed(5)}
                   </Text>
                 </Text>
-
-                {selectedReport.recognizedCategory && (
+                 {selectedReport.recognizedCategory && (
                     <Text style={styles.modalText}>
                     Status:{' '}
                     <Text style={styles.modalTextHighlight}>
@@ -1505,7 +1417,6 @@ const MapScreen = ({ navigation }) => {
 
 
                 <View style={styles.evidenceSection}>
-
                   {photoEvidence ? (
                     <View style={styles.imageFrame}>
                       <Image source={{ uri: photoEvidence.uri }} style={styles.evidencePreview} resizeMode="contain" />
@@ -1515,24 +1426,17 @@ const MapScreen = ({ navigation }) => {
                       <Image source={{ uri: selectedReport.imageUrl }} style={styles.evidencePreview} resizeMode="contain" />
                     </View>
                   ) : (
-
                     <View style={styles.noPhotoContainer}>
                       <Text style={styles.noPhotoText}>No Photo Evidence</Text>
                     </View>
                   )}
 
 
-
                   {!selectedReport.imageUrl && !photoEvidence && (
-                    <TouchableOpacity
-                      style={styles.evidenceButton}
-                      onPress={pickImage}
-                      disabled={isUploading || isDeletingImage}
-                    >
+                    <TouchableOpacity style={styles.evidenceButton} onPress={pickImage} disabled={isUploading || isDeletingImage}>
                       <Text style={styles.evidenceButtonText}>Add Photo Evidence</Text>
                     </TouchableOpacity>
                   )}
-
 
                   {selectedReport.imageUrl && !photoEvidence && (
                     <TouchableOpacity
@@ -1540,17 +1444,12 @@ const MapScreen = ({ navigation }) => {
                       onPress={handleRemoveImage}
                       disabled={isDeletingImage || isUploading}
                     >
-                      {isDeletingImage ? (
-                        <ActivityIndicator color="#fff" size="small" />
-                      ) : (
-                        <Text style={styles.modalButtonText}>Remove Photo</Text>
-                      )}
+                      {isDeletingImage ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonText}>Remove Photo</Text>}
                     </TouchableOpacity>
                   )}
 
-
                   {photoEvidence && (
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-around', width: '80%', marginTop: 5 }}>
+                    <View style={styles.photoActionContainer}>
                       <TouchableOpacity
                         style={[styles.modalButton, styles.submitButton, { flex: 1, marginHorizontal: 5 }, (isUploading || isDeletingImage) && { opacity: 0.5 }]}
                         onPress={submitPhotoEvidence}
@@ -1572,14 +1471,14 @@ const MapScreen = ({ navigation }) => {
 
 
               <View style={styles.modalFooterContainer}>
-
                  <View style={styles.modalNavContainer}>
+
                     <TouchableOpacity
                         style={[styles.navButton, (selectedMarkerIndex === null || selectedMarkerIndex === 0 || userMarkers.length <= 1) && styles.navButtonDisabled]}
                         onPress={goToPreviousMarker}
                         disabled={selectedMarkerIndex === null || selectedMarkerIndex === 0 || userMarkers.length <= 1}
                     >
-                        <Text style={styles.navButtonText}>{'<'}</Text>
+                        <Text style={styles.navButtonText}>Prev</Text>
                     </TouchableOpacity>
 
 
@@ -1591,23 +1490,17 @@ const MapScreen = ({ navigation }) => {
                         {isUploading || isDeletingImage ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonText}>Mark Cleaned</Text>}
                     </TouchableOpacity>
 
+
                     <TouchableOpacity
                         style={[styles.navButton, (selectedMarkerIndex === null || selectedMarkerIndex >= userMarkers.length - 1 || userMarkers.length <= 1) && styles.navButtonDisabled]}
                         onPress={goToNextMarker}
                         disabled={selectedMarkerIndex === null || selectedMarkerIndex >= userMarkers.length - 1 || userMarkers.length <= 1}
                     >
-                        <Text style={styles.navButtonText}>{'>'}</Text>
+                        <Text style={styles.navButtonText}>Next</Text>
                     </TouchableOpacity>
                  </View>
 
 
-                <TouchableOpacity
-                  style={[styles.closeButton, (isUploading || isDeletingImage) && { opacity: 0.5 }]}
-                  onPress={() => setShowPreviewModal(false)}
-                  disabled={isUploading || isDeletingImage}
-                >
-                  <Text style={styles.modalButtonText}>Close Details</Text>
-                </TouchableOpacity>
               </View>
             </Animated.View>
           </View>

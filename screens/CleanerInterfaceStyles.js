@@ -8,7 +8,6 @@ const availableWidth = width - screenPadding - cardMargin;
 const cardWidth = availableWidth / numColumns;
 
 const styles = StyleSheet.create({
-
   container: {
     flex: 1,
     backgroundColor: '#121212',
@@ -81,7 +80,6 @@ const styles = StyleSheet.create({
     marginTop: 60,
     paddingHorizontal: 20,
   },
-
   listContainer: {
     paddingHorizontal: 10,
     paddingTop: 10,
@@ -91,8 +89,6 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     marginBottom: 10,
   },
-
-
   reportCard: {
     backgroundColor: '#1E1E1E',
     borderRadius: 8,
@@ -174,14 +170,9 @@ const styles = StyleSheet.create({
      color: '#999',
      textAlign: 'center',
   },
-
-
-
   priorityLow: { color: '#FFEB3B' },
   priorityMedium: { color: '#FF9800' },
   priorityHigh: { color: '#F44336' },
-
-
   pagination: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -212,8 +203,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 10,
     fontWeight: '600',
   },
-
-
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.75)',
@@ -334,5 +323,3 @@ const styles = StyleSheet.create({
       fontSize: 14,
   },
 });
-
-export default styles;
