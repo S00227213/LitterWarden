@@ -41,6 +41,43 @@ const styles = StyleSheet.create({
       color: '#BB86FC',
       fontSize: 16,
   },
+  filterBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    backgroundColor: '#1E1E1E',
+    paddingVertical: 10,
+    paddingHorizontal: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+    flexWrap: 'wrap',
+  },
+  filterButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#555',
+    marginHorizontal: 3,
+    marginBottom: 5,
+  },
+  filterButtonActive: {
+    borderColor: '#BB86FC',
+    backgroundColor: 'rgba(187, 134, 252, 0.2)',
+  },
+  filterButtonHigh: { borderColor: '#F44336', },
+  filterButtonMedium: { borderColor: '#FF9800', },
+  filterButtonLow: { borderColor: '#FFEB3B', },
+  filterButtonClean: { borderColor: '#4CAF50', },
+  filterButtonText: {
+    color: '#A0A0A0',
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  filterButtonTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
   contentArea: {
     flex: 1,
   },
@@ -173,6 +210,7 @@ const styles = StyleSheet.create({
   priorityLow: { color: '#FFEB3B' },
   priorityMedium: { color: '#FF9800' },
   priorityHigh: { color: '#F44336' },
+  priorityClean: { color: '#4CAF50', },
   pagination: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -315,7 +353,6 @@ const styles = StyleSheet.create({
      backgroundColor: '#FFC107',
      marginTop: 5,
   },
-
   modalErrorText: {
       color: '#FF7043',
       textAlign: 'center',
@@ -323,3 +360,5 @@ const styles = StyleSheet.create({
       fontSize: 14,
   },
 });
+
+export default styles;

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -30,7 +30,7 @@ const CleanerInterface = () => {
   const navigation = useNavigation();
   const SERVER_URL = REACT_APP_SERVER_URL;
 
-  const [reports, setReports] = useState([]);
+  const [allReports, setAllReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [userEmail, setUserEmail] = useState('');
@@ -38,6 +38,7 @@ const CleanerInterface = () => {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [afterPhoto, setAfterPhoto] = useState(null);
+  const [filterSelection, setFilterSelection] = useState('all_pending');
 
 
   const itemsPerPage = 9;
@@ -51,21 +52,19 @@ const CleanerInterface = () => {
       } else {
         console.log("[CleanerIF] No user. Redirecting.");
         setUserEmail('');
-        setReports([]);
+        setAllReports([]);
         setCurrentPage(0);
         setError('User not logged in.');
-        // Optional: Redirect to login if needed
-        // navigation.navigate('Login');
       }
     });
     return () => unsubscribe();
   }, [navigation]);
 
-  const fetchPendingReports = useCallback(async () => {
+  const fetchAllReportsForCleaner = useCallback(async () => {
     if (!userEmail) {
         console.log("[CleanerIF] No user email, skipping fetch.");
         setLoading(false);
-        setReports([]);
+        setAllReports([]);
         return;
     }
     if (!SERVER_URL) {
@@ -75,11 +74,12 @@ const CleanerInterface = () => {
       return;
     }
 
-    console.log("[CleanerIF] Fetching pending reports...");
+    console.log("[CleanerIF] Fetching ALL reports (clean & pending)...");
     setLoading(true);
     setError('');
     try {
-      const url = `${SERVER_URL}/reports?includeClean=false&limit=500`; // Fetch all pending reports
+
+      const url = `${SERVER_URL}/reports?limit=1000&includeClean=true`;
       console.log("[CleanerIF] Fetch URL:", url);
       const response = await fetch(url);
       console.log("[CleanerIF] HTTP status:", response.status);
@@ -92,43 +92,57 @@ const CleanerInterface = () => {
       }
 
       const data = await response.json();
+
       const sortedData = (Array.isArray(data) ? data : [])
-                           .filter(report => !report.isClean) // Double ensure clean reports are filtered
                            .sort((a, b) => {
-                             const priorityOrder = { high: 3, medium: 2, low: 1 };
-                             // Sort by priority first (descending)
-                             if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
-                               return priorityOrder[b.priority] - priorityOrder[a.priority];
-                             }
-                             // Then sort by date (most recent first)
+                             const priorityOrder = { high: 3, medium: 2, low: 1, clean: 0 };
+                             const priorityA = a.isClean ? 0 : priorityOrder[a.priority] || 0;
+                             const priorityB = b.isClean ? 0 : priorityOrder[b.priority] || 0;
+
+                             if(priorityA !== priorityB) return priorityB - priorityA;
+
                              return new Date(b.reportedAt) - new Date(a.reportedAt);
                            });
 
-      setReports(sortedData);
-      setCurrentPage(0); // Reset to first page after fetching
+      setAllReports(sortedData);
+      setCurrentPage(0);
     } catch (err) {
       console.error("[CleanerIF] Fetch error:", err);
       setError(`Failed to fetch reports: ${err.message}`);
-      setReports([]); // Clear reports on error
+      setAllReports([]);
     } finally {
       setLoading(false);
       console.log("[CleanerIF] Fetch complete.");
     }
-  }, [userEmail, SERVER_URL]); // Dependency on userEmail and SERVER_URL
+  }, [userEmail, SERVER_URL]);
 
   useFocusEffect(
     React.useCallback(() => {
       console.log("[CleanerIF] Screen focused.");
       if (userEmail) {
-          fetchPendingReports(); // Fetch reports when screen comes into focus and user is logged in
+          fetchAllReportsForCleaner();
       } else {
-          // Clear state if user logs out while navigating away and back
-          setReports([]);
+
+          setAllReports([]);
           setCurrentPage(0);
           setLoading(false);
       }
-    }, [userEmail, fetchPendingReports]) // Re-run if userEmail or fetch function changes
+    }, [userEmail, fetchAllReportsForCleaner])
   );
+
+  const handleFilterChange = (selection) => {
+    setFilterSelection(selection);
+    setCurrentPage(0);
+  };
+
+  const filteredReports = useMemo(() => {
+      return allReports.filter(report => {
+          if (filterSelection === 'clean') return report.isClean;
+          if (filterSelection === 'all_pending') return !report.isClean;
+          // For high, medium, low filters, also ensure it's not clean
+          return !report.isClean && report.priority === filterSelection;
+      });
+  }, [allReports, filterSelection]);
 
   const handleMarkClean = async () => {
     if (!selectedReport || !selectedReport._id) {
@@ -141,10 +155,6 @@ const CleanerInterface = () => {
     }
 
     if (afterPhoto) {
-        // Placeholder: In a real scenario, upload afterPhoto to S3 here *before* marking clean.
-        // This would involve getting a presigned URL, uploading, then potentially passing
-        // the new URL to the /report/clean endpoint if the backend needs it.
-        // For now, we just proceed with marking clean.
         console.log("[CleanerIF] 'After' photo exists, but upload is not implemented. Proceeding to mark clean.");
     }
 
@@ -170,19 +180,22 @@ const CleanerInterface = () => {
               if (response.ok) {
                 Alert.alert('Success', 'Report marked as clean.');
 
-                // Update state optimistically or based on response
-                setReports(prevReports => {
-                    const updated = prevReports.filter(r => r._id !== selectedReport._id);
-                    // Adjust current page if the last item on it was removed
-                    const totalPagesAfter = Math.ceil(updated.length / itemsPerPage);
-                    if (currentPage >= totalPagesAfter && totalPagesAfter > 0) {
-                        setCurrentPage(totalPagesAfter - 1);
-                    } else if (updated.length === 0) {
-                        setCurrentPage(0);
-                    }
-                    return updated;
-                });
-                handleCloseModal(); // Close modal on success
+                setAllReports(prevReports => prevReports.map(r =>
+                    r._id === selectedReport._id ? { ...r, isClean: true, imageUrl: null, recognizedCategory: 'Cleaned' } : r
+                ));
+
+                const currentFilteredLength = filteredReports.filter(r => r._id !== selectedReport._id).length;
+                const totalPagesAfter = Math.ceil(currentFilteredLength / itemsPerPage);
+
+                if (currentPage >= totalPagesAfter && totalPagesAfter > 0) {
+                    setCurrentPage(totalPagesAfter - 1);
+                } else if (currentFilteredLength === 0 && currentPage > 0) {
+                    setCurrentPage(currentPage - 1);
+                } else if (currentFilteredLength === 0) {
+                    setCurrentPage(0);
+                }
+
+                handleCloseModal();
               } else {
                 const errorData = await response.json().catch(() => ({ error: 'Failed to parse error response' }));
                 console.error("[CleanerIF] Mark clean failed:", response.status, errorData);
@@ -223,13 +236,13 @@ const CleanerInterface = () => {
       Alert.alert("Image Error", response.errorMessage);
     } else if (response.assets && response.assets.length > 0) {
       console.log("After photo selected:", response.assets[0].uri);
-      setAfterPhoto(response.assets[0]); // Store the full asset object
+      setAfterPhoto(response.assets[0]);
     }
   }, []);
 
   const handleSelectReport = (report) => {
     setSelectedReport(report);
-    setAfterPhoto(null); // Reset after photo when selecting a new report
+    setAfterPhoto(null);
     setIsModalVisible(true);
   };
 
@@ -237,19 +250,17 @@ const CleanerInterface = () => {
     setIsModalVisible(false);
     setSelectedReport(null);
     setAfterPhoto(null);
-    setIsSubmitting(false); // Reset submitting state
+    setIsSubmitting(false);
   };
 
 
-  // Calculate reports for the current page
-  const currentReports = reports.slice(
+  const currentReports = filteredReports.slice(
     currentPage * itemsPerPage,
     (currentPage + 1) * itemsPerPage
   );
-  const totalPages = Math.ceil(reports.length / itemsPerPage);
+  const totalPages = Math.ceil(filteredReports.length / itemsPerPage);
 
 
-  // Component to render each report card
   const renderReportItem = ({ item }) => {
     const lat = parseFloat(item.latitude);
     const lon = parseFloat(item.longitude);
@@ -257,15 +268,15 @@ const CleanerInterface = () => {
     const initialRegion = isValidCoords
         ? { latitude: lat, longitude: lon, latitudeDelta: 0.005, longitudeDelta: 0.005 }
         : null;
-    const priorityStyle = styles[`priority${item.priority.charAt(0).toUpperCase() + item.priority.slice(1)}`];
-
+    const priorityStyle = item.isClean ? styles.priorityClean : styles[`priority${item.priority.charAt(0).toUpperCase() + item.priority.slice(1)}`];
+    const priorityText = item.isClean ? "CLEAN" : item.priority.toUpperCase();
 
     return (
       <TouchableOpacity style={styles.reportCard} onPress={() => handleSelectReport(item)} activeOpacity={0.7}>
 
         <View style={styles.cardHeader}>
              <Text style={[styles.priorityText, priorityStyle]} numberOfLines={1}>
-                {item.priority.toUpperCase()}
+                {priorityText}
              </Text>
              <Text style={styles.dateText}>
                 {new Date(item.reportedAt).toLocaleDateString()}
@@ -313,7 +324,7 @@ const CleanerInterface = () => {
     );
   };
 
-  // Component to render the details modal
+
    const renderDetailModal = () => {
     if (!isModalVisible || !selectedReport) return null;
 
@@ -323,7 +334,8 @@ const CleanerInterface = () => {
     const modalMapRegion = isValidCoords
         ? { latitude: lat, longitude: lon, latitudeDelta: 0.005, longitudeDelta: 0.005 }
         : null;
-    const priorityStyle = styles[`priority${selectedReport.priority.charAt(0).toUpperCase() + selectedReport.priority.slice(1)}`];
+    const priorityStyle = selectedReport.isClean ? styles.priorityClean : styles[`priority${selectedReport.priority.charAt(0).toUpperCase() + selectedReport.priority.slice(1)}`];
+    const statusText = selectedReport.isClean ? "CLEAN" : selectedReport.priority.toUpperCase();
 
     return (
       <Modal
@@ -340,8 +352,8 @@ const CleanerInterface = () => {
               {error ? <Text style={styles.modalErrorText}>{error}</Text> : null}
 
               <Text style={styles.modalDetailRow}>
-                <Text style={styles.modalLabel}>Priority: </Text>
-                <Text style={[styles.modalValue, priorityStyle]}>{selectedReport.priority.toUpperCase()}</Text>
+                <Text style={styles.modalLabel}>Status: </Text>
+                <Text style={[styles.modalValue, priorityStyle]}>{statusText}</Text>
               </Text>
               <Text style={styles.modalDetailRow}>
                 <Text style={styles.modalLabel}>Location: </Text>
@@ -363,43 +375,45 @@ const CleanerInterface = () => {
                 <Text style={styles.modalLabel}>Reported At: </Text>
                 <Text style={styles.modalValue}>{new Date(selectedReport.reportedAt).toLocaleString()}</Text>
               </Text>
-               {selectedReport.recognizedCategory && selectedReport.recognizedCategory !== 'Analysis Pending' && selectedReport.recognizedCategory !== 'Analysis Skipped' && (
+               {selectedReport.recognizedCategory && selectedReport.recognizedCategory !== 'Analysis Pending' && selectedReport.recognizedCategory !== 'Analysis Skipped' && !selectedReport.isClean && (
                  <Text style={styles.modalDetailRow}>
                     <Text style={styles.modalLabel}>Detected: </Text>
                     <Text style={styles.modalValue}>{selectedReport.recognizedCategory}</Text>
                  </Text>
                )}
 
-              {selectedReport.imageUrl && (
+              {selectedReport.imageUrl && !selectedReport.isClean && (
                 <View style={styles.evidenceSection}>
                   <Text style={styles.modalLabel}>Original Evidence:</Text>
                   <Image source={{ uri: selectedReport.imageUrl }} style={styles.evidenceImage} resizeMode="contain" />
                 </View>
               )}
 
-               <View style={styles.evidenceSection}>
-                 <Text style={styles.modalLabel}>Photo After Cleanup (Optional):</Text>
-                 {afterPhoto ? (
-                    <>
-                     <Image source={{ uri: afterPhoto.uri }} style={styles.evidenceImage} resizeMode="contain" />
-                     <TouchableOpacity
-                        style={[styles.modalButton, styles.changePhotoButton]}
-                        onPress={pickAfterImage}
-                        disabled={isSubmitting}
-                      >
-                         <Text style={styles.modalButtonText}>Change Photo</Text>
-                     </TouchableOpacity>
-                    </>
-                 ) : (
-                    <TouchableOpacity
-                        style={[styles.modalButton, styles.addPhotoButton]}
-                        onPress={pickAfterImage}
-                        disabled={isSubmitting}
-                      >
-                         <Text style={styles.modalButtonText}>Add 'After' Photo</Text>
-                     </TouchableOpacity>
-                 )}
-               </View>
+               {!selectedReport.isClean && (
+                   <View style={styles.evidenceSection}>
+                     <Text style={styles.modalLabel}>Photo After Cleanup (Optional):</Text>
+                     {afterPhoto ? (
+                        <>
+                         <Image source={{ uri: afterPhoto.uri }} style={styles.evidenceImage} resizeMode="contain" />
+                         <TouchableOpacity
+                            style={[styles.modalButton, styles.changePhotoButton]}
+                            onPress={pickAfterImage}
+                            disabled={isSubmitting}
+                          >
+                             <Text style={styles.modalButtonText}>Change Photo</Text>
+                         </TouchableOpacity>
+                        </>
+                     ) : (
+                        <TouchableOpacity
+                            style={[styles.modalButton, styles.addPhotoButton]}
+                            onPress={pickAfterImage}
+                            disabled={isSubmitting}
+                          >
+                             <Text style={styles.modalButtonText}>Add 'After' Photo</Text>
+                         </TouchableOpacity>
+                     )}
+                   </View>
+               )}
 
               {isValidCoords && REACT_APP_GOOGLE_MAPS_API_KEY ? (
                 <View style={styles.modalMapContainer}>
@@ -428,17 +442,19 @@ const CleanerInterface = () => {
               >
                 <Text style={styles.modalButtonText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.confirmButton, isSubmitting && styles.disabledButton]}
-                onPress={handleMarkClean}
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? (
-                  <ActivityIndicator size="small" color="#ffffff" />
-                ) : (
-                  <Text style={styles.modalButtonText}>Mark as Clean</Text>
-                )}
-              </TouchableOpacity>
+              {!selectedReport.isClean && (
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.confirmButton, isSubmitting && styles.disabledButton]}
+                    onPress={handleMarkClean}
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? (
+                      <ActivityIndicator size="small" color="#ffffff" />
+                    ) : (
+                      <Text style={styles.modalButtonText}>Mark as Clean</Text>
+                    )}
+                  </TouchableOpacity>
+              )}
             </View>
           </View>
         </View>
@@ -446,15 +462,43 @@ const CleanerInterface = () => {
     );
   };
 
-  // Main component render
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1E1E1E" />
       <View style={styles.headerBar}>
-        <Text style={styles.headerTitle}>Pending Cleanup Tasks</Text>
+        <Text style={styles.headerTitle}>Cleanup Tasks</Text>
          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Text style={styles.backButtonText}>Back</Text>
          </TouchableOpacity>
+      </View>
+
+      <View style={styles.filterBar}>
+          <TouchableOpacity
+            style={[styles.filterButton, filterSelection === 'all_pending' && styles.filterButtonActive]}
+            onPress={() => handleFilterChange('all_pending')}>
+            <Text style={[styles.filterButtonText, filterSelection === 'all_pending' && styles.filterButtonTextActive]}>All Pending ({allReports.filter(r=>!r.isClean).length})</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterButton, styles.filterButtonHigh, filterSelection === 'high' && styles.filterButtonActive]}
+            onPress={() => handleFilterChange('high')}>
+            <Text style={[styles.filterButtonText, filterSelection === 'high' && styles.filterButtonTextActive]}>High ({allReports.filter(r => r.priority === 'high' && !r.isClean).length})</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+             style={[styles.filterButton, styles.filterButtonMedium, filterSelection === 'medium' && styles.filterButtonActive]}
+            onPress={() => handleFilterChange('medium')}>
+            <Text style={[styles.filterButtonText, filterSelection === 'medium' && styles.filterButtonTextActive]}>Medium ({allReports.filter(r => r.priority === 'medium' && !r.isClean).length})</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterButton, styles.filterButtonLow, filterSelection === 'low' && styles.filterButtonActive]}
+            onPress={() => handleFilterChange('low')}>
+            <Text style={[styles.filterButtonText, filterSelection === 'low' && styles.filterButtonTextActive]}>Low ({allReports.filter(r => r.priority === 'low' && !r.isClean).length})</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterButton, styles.filterButtonClean, filterSelection === 'clean' && styles.filterButtonActive]}
+            onPress={() => handleFilterChange('clean')}>
+            <Text style={[styles.filterButtonText, filterSelection === 'clean' && styles.filterButtonTextActive]}>Clean ({allReports.filter(r=>r.isClean).length})</Text>
+          </TouchableOpacity>
       </View>
 
 
@@ -464,13 +508,13 @@ const CleanerInterface = () => {
         ) : error ? (
             <View style={styles.errorContainer}>
                 <Text style={styles.errorText}>{error}</Text>
-                <TouchableOpacity onPress={fetchPendingReports} style={styles.retryButton}>
+                <TouchableOpacity onPress={fetchAllReportsForCleaner} style={styles.retryButton}>
                     <Text style={styles.retryButtonText}>Retry Fetch</Text>
                 </TouchableOpacity>
             </View>
-        ) : reports.length === 0 ? (
+        ) : filteredReports.length === 0 ? (
             <Text style={styles.noReportsText}>
-            No pending cleanup tasks found.
+                No {filterSelection === 'all_pending' ? 'pending' : filterSelection} tasks found.
             </Text>
         ) : (
 
@@ -492,7 +536,7 @@ const CleanerInterface = () => {
         )}
 
 
-        {!loading && reports.length > 0 && totalPages > 1 && (
+        {!loading && filteredReports.length > 0 && totalPages > 1 && (
             <View style={styles.pagination}>
                 <TouchableOpacity
                 onPress={() => setCurrentPage((prev) => Math.max(prev - 1, 0))}
