@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,216 +6,323 @@ import {
   FlatList,
   ActivityIndicator,
   StatusBar,
-  Modal,
   Alert,
+  Modal,
+  Linking,
+  Platform,
+  Image,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
-import { useFocusEffect } from '@react-navigation/native';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebaseConfig';
-import { REACT_APP_GOOGLE_MAPS_API_KEY, REACT_APP_SERVER_URL } from '@env';
+import { useFocusEffect } from '@react-navigation/native';
+import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  REACT_APP_GOOGLE_MAPS_API_KEY,
+  REACT_APP_SERVER_URL,
+  AWS_ACCESS_KEY_ID,
+  AWS_SECRET_ACCESS_KEY,
+  S3_BUCKET_NAME,
+} from '@env';
 import styles from './DashboardScreenStyles';
 
+// Initialize S3 client
+const s3Client = new S3Client({
+  region: 'eu-west-1',
+  credentials: {
+    accessKeyId: AWS_ACCESS_KEY_ID,
+    secretAccessKey: AWS_SECRET_ACCESS_KEY,
+  },
+});
+
 if (!REACT_APP_GOOGLE_MAPS_API_KEY) {
-  console.warn("API key missing.");
+  console.warn('[Dashboard] Google Maps API key missing.');
 }
 if (!REACT_APP_SERVER_URL) {
-  console.warn("Server URL missing.");
+  console.warn('[Dashboard] Server URL missing.');
 }
 
+// Validate latitude/longitude
+const isValidLatLng = (lat, lon) => {
+  const parsedLat = parseFloat(lat);
+  const parsedLon = parseFloat(lon);
+  return (
+    !Number.isNaN(parsedLat) &&
+    !Number.isNaN(parsedLon) &&
+    Math.abs(parsedLat) <= 90 &&
+    Math.abs(parsedLon) <= 180
+  );
+};
 
 const Dashboard = ({ navigation }) => {
+  // Backend URL
   const SERVER_URL = REACT_APP_SERVER_URL;
 
+  // Reports state
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [userEmail, setUserEmail] = useState('');
-  const [selectedReport, setSelectedReport] = useState(null);
-  const itemsPerPage = 9;
-  const [currentPage, setCurrentPage] = useState(0);
 
+  // User/profile state
+  const [userEmail, setUserEmail] = useState('');
+  const [profilePhotoUri, setProfilePhotoUri] = useState(null);
+  const [uploading, setUploading] = useState(false);
+
+  // Pagination & filtering
+  const [currentPage, setCurrentPage] = useState(0);
+  const [filterSelection, setFilterSelection] = useState('all');
+  const itemsPerPage = 9;
+
+  // Profile modal
+  const [showProfileModal, setShowProfileModal] = useState(false);
+
+  // Open native map application at given coords
+  const openInGoogleMaps = (lat, lon) => {
+    const label = 'Litter Report';
+    const url =
+      Platform.OS === 'ios'
+        ? `http://maps.apple.com/?q=${encodeURIComponent(label)}&ll=${lat},${lon}`
+        : `geo:0,0?q=${lat},${lon}(${encodeURIComponent(label)})`;
+
+    Linking.canOpenURL(url)
+      .then((supported) =>
+        supported
+          ? Linking.openURL(url)
+          : Linking.openURL(
+              `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`
+            )
+      )
+      .catch((err) => {
+        console.error('Error opening map link:', err);
+        Alert.alert('Error', 'Could not open map application.');
+      });
+  };
+
+  // Listen for Firebase auth state changes
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
-        console.log("[Dashboard] Authenticated:", user.email);
         setUserEmail(user.email);
       } else {
-        console.log("[Dashboard] No user.");
         setUserEmail('');
         setReports([]);
         setCurrentPage(0);
+        setFilterSelection('all');
         setLoading(false);
       }
     });
     return () => unsubscribe();
   }, []);
 
-  useEffect(() => {
-    console.log("[Dashboard] User email:", userEmail);
-  }, [userEmail]);
-
-  const fetchUserReports = async () => {
+  // Fetch reports for this user
+  const fetchReports = useCallback(async () => {
     if (!userEmail) {
-      console.log("[Dashboard] No userEmail; skipping fetch.");
-      setLoading(false);
       setReports([]);
-      return;
-    }
-    if (!SERVER_URL || SERVER_URL === 'https://backup-default-url.example.com') {
-      console.error("[Dashboard] Server URL not configured.");
-      Alert.alert('Configuration Error', 'Server URL not configured.');
       setLoading(false);
       return;
     }
-    console.log("[Dashboard] Fetching reports for:", userEmail);
     setLoading(true);
     try {
-      const url = `${SERVER_URL}/reports?email=${encodeURIComponent(userEmail)}&includeClean=true`;
-      console.log("[Dashboard] Fetch URL:", url);
-      const response = await fetch(url);
-      console.log("[Dashboard] HTTP status:", response.status);
-      if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
-      const data = await response.json();
-      const sortedData = (Array.isArray(data) ? data : []).sort(
-        (a, b) => new Date(b.reportedAt) - new Date(a.reportedAt)
+      const resp = await fetch(
+        `${SERVER_URL}/reports?email=${encodeURIComponent(
+          userEmail
+        )}&includeClean=true`
       );
-      setReports(sortedData);
+      if (!resp.ok) throw new Error(`Status ${resp.status}`);
+      const data = await resp.json();
+      setReports(Array.isArray(data) ? data : []);
       setCurrentPage(0);
-    } catch (error) {
-      console.error("[Dashboard] Fetch error:", error);
-      Alert.alert('Error', `Unable to fetch your reports. ${error.message}`);
+    } catch (err) {
+      Alert.alert('Fetch Error', err.message);
       setReports([]);
     } finally {
       setLoading(false);
-      console.log("[Dashboard] Fetch complete.");
     }
-  };
+  }, [userEmail]);
 
-  const deleteReport = async (reportId) => {
-    if (!SERVER_URL || SERVER_URL === 'https://backup-default-url.example.com') {
-      console.error("[Dashboard] Delete failed: Server URL not configured.");
-      Alert.alert('Configuration Error', 'Server URL not configured.');
-      return;
-    }
-    Alert.alert(
-      "Delete Report",
-      "Are you sure you want to permanently delete this report?",
-      [
-        { text: "Cancel", style: "cancel" },
+  // Refetch when screen gains focus
+  useFocusEffect(
+    useCallback(() => {
+      if (userEmail) {
+        fetchReports();
+      } else {
+        setLoading(false);
+      }
+    }, [userEmail, fetchReports])
+  );
+
+  // Delete a single report
+  const deleteReport = useCallback(
+    (reportId) => {
+      Alert.alert('Delete Report?', 'This cannot be undone.', [
+        { text: 'Cancel', style: 'cancel' },
         {
-          text: "Delete",
+          text: 'Delete',
+          style: 'destructive',
           onPress: async () => {
             setLoading(true);
             try {
-              const url = `${SERVER_URL}/report/${reportId}`;
-              console.log("[Dashboard] Delete URL:", url);
-              const response = await fetch(url, { method: 'DELETE' });
-
-              if (response.ok) {
-                setReports((prev) => {
-                  const updated = prev.filter((r) => r._id !== reportId);
-                  const total = Math.ceil(updated.length / itemsPerPage);
-                  if (currentPage >= total && total > 0) {
-                    setCurrentPage(total - 1);
-                  } else if (updated.length === 0) {
-                    setCurrentPage(0);
-                  }
-                  return updated;
-                });
-                Alert.alert('Success', 'Report deleted successfully.');
-              } else {
-                const errorData = await response.text();
-                console.error("[Dashboard] Delete failed:", response.status, errorData);
-                Alert.alert('Error', `Delete failed. Status ${response.status}. ${errorData}`);
-              }
-            } catch (error) {
-              console.error("[Dashboard] Delete error:", error);
-              Alert.alert('Error', `Could not delete report. ${error.message}`);
+              const resp = await fetch(
+                `${SERVER_URL}/report/${reportId}`,
+                { method: 'DELETE' }
+              );
+              if (!resp.ok)
+                throw new Error(`Status ${resp.status}: ${await resp.text()}`);
+              setReports((r) => r.filter((x) => x._id !== reportId));
+              Alert.alert('Deleted');
+            } catch (err) {
+              Alert.alert('Error', err.message);
             } finally {
               setLoading(false);
             }
           },
-          style: "destructive",
         },
-      ]
-    );
-  };
-
-  useFocusEffect(
-    React.useCallback(() => {
-      console.log("[Dashboard] Focus triggered.");
-      if (userEmail) {
-        fetchUserReports();
-      } else {
-        setReports([]);
-        setCurrentPage(0);
-        setLoading(false);
-      }
-    }, [userEmail])
+      ]);
+    },
+    [SERVER_URL]
   );
 
-  const currentReports = reports.slice(
+  // Apply filtering & sorting
+  const filteredAndSorted = useMemo(() => {
+    const order = { high: 3, medium: 2, low: 1 };
+    let list = [...reports];
+    if (filterSelection === 'clean') {
+      list = list.filter((r) => r.isClean);
+    } else if (['high', 'medium', 'low'].includes(filterSelection)) {
+      list = list.filter(
+        (r) => !r.isClean && r.priority === filterSelection
+      );
+    }
+    list.sort((a, b) => {
+      if (!a.isClean && b.isClean) return -1;
+      if (a.isClean && !b.isClean) return 1;
+      if (!a.isClean && !b.isClean) {
+        return (order[b.priority] || 0) - (order[a.priority] || 0);
+      }
+      return new Date(b.reportedAt) - new Date(a.reportedAt);
+    });
+    return list;
+  }, [reports, filterSelection]);
+
+  // Pagination
+  const totalPages = Math.ceil(filteredAndSorted.length / itemsPerPage);
+  const pageItems = filteredAndSorted.slice(
     currentPage * itemsPerPage,
     (currentPage + 1) * itemsPerPage
   );
-  const totalPages = Math.ceil(reports.length / itemsPerPage);
 
-  const isValidLatLng = (lat, lon) => {
-    const parsedLat = parseFloat(lat);
-    const parsedLon = parseFloat(lon);
-    return (
-      !Number.isNaN(parsedLat) &&
-      !Number.isNaN(parsedLon) &&
-      Math.abs(parsedLat) <= 90 &&
-      Math.abs(parsedLon) <= 180
-    );
+  const handleFilter = (sel) => {
+    setFilterSelection(sel);
+    setCurrentPage(0);
   };
 
+  // Choose camera or library, then upload
+  const pickOrTakePhoto = () => {
+    Alert.alert('Select Photo', 'Choose source', [
+      {
+        text: 'Camera',
+        onPress: () =>
+          launchCamera(
+            { mediaType: 'photo', quality: 0.7, maxWidth: 512, maxHeight: 512 },
+            handleImage
+          ),
+      },
+      {
+        text: 'Library',
+        onPress: () =>
+          launchImageLibrary(
+            { mediaType: 'photo', quality: 0.7, maxWidth: 512, maxHeight: 512 },
+            handleImage
+          ),
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  // Handle picked image and upload to S3
+  const handleImage = async (response) => {
+    if (response.didCancel) return;
+    if (response.errorCode) {
+      return Alert.alert('Image Error', response.errorMessage);
+    }
+    const asset = response.assets && response.assets[0];
+    if (!asset || !asset.uri) return;
+    setUploading(true);
+    try {
+      // Fetch blob from local URI
+      const fetchRes = await fetch(asset.uri);
+      const blob = await fetchRes.blob();
+      // Generate key
+      const ext = asset.fileName?.split('.').pop() || 'jpg';
+      const safeEmail = userEmail.replace(/[@.]/g, '_');
+      const key = `profile-photos/${safeEmail}_${Date.now()}.${ext}`;
+      // Upload to S3
+      await s3Client.send(
+        new PutObjectCommand({
+          Bucket: S3_BUCKET_NAME,
+          Key: key,
+          Body: blob,
+          ContentType: blob.type,
+        })
+      );
+      // Public URL
+      const url = `https://${S3_BUCKET_NAME}.s3.eu-west-1.amazonaws.com/${key}`;
+      setProfilePhotoUri(url);
+    } catch (err) {
+      console.error('Upload Error', err);
+      Alert.alert('Upload Error', err.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Render each report item
   const renderReport = ({ item }) => {
     const lat = parseFloat(item.latitude);
     const lon = parseFloat(item.longitude);
-    const validCoordinates = isValidLatLng(lat, lon);
-    const initialRegion = validCoordinates
+    const valid = isValidLatLng(lat, lon);
+    const region = valid
       ? { latitude: lat, longitude: lon, latitudeDelta: 0.01, longitudeDelta: 0.01 }
       : null;
+    const prioStyle = item.isClean
+      ? styles.priorityClean
+      : styles[`priority${item.priority.charAt(0).toUpperCase() + item.priority.slice(1)}`];
 
     return (
       <View style={styles.reportCard}>
         <View style={styles.reportRow}>
           <View style={styles.reportTextContainer}>
-            <Text style={styles.row} numberOfLines={1} ellipsizeMode="tail">
-              <Text style={styles.label}>Town: </Text>
-              <Text style={styles.value}>
-                {item.town && !item.town.includes('Error') ? item.town : 'Unknown'}
+            {['Town', 'County', 'Country', 'Email'].map((field) => (
+              <Text
+                key={field}
+                style={styles.row}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                <Text style={styles.label}>{field}: </Text>
+                <Text style={styles.value}>
+                  {item[field.toLowerCase()]?.includes('Error')
+                    ? 'N/A'
+                    : item[field.toLowerCase()]}
+                </Text>
               </Text>
-            </Text>
-            <Text style={styles.row} numberOfLines={1} ellipsizeMode="tail">
-              <Text style={styles.label}>County: </Text>
-              <Text style={styles.value}>
-                {item.county && !item.county.includes('Error') ? item.county : 'Unknown'}
+            ))}
+            {!item.isClean ? (
+              <Text style={styles.row}>
+                <Text style={styles.label}>Priority: </Text>
+                <Text style={[styles.value, prioStyle]}>
+                  {item.priority.toUpperCase()}
+                </Text>
               </Text>
-            </Text>
-            <Text style={styles.row} numberOfLines={1} ellipsizeMode="tail">
-              <Text style={styles.label}>Country: </Text>
-              <Text style={styles.value}>
-                {item.country && !item.country.includes('Error') ? item.country : 'Unknown'}
+            ) : (
+              <Text style={styles.row}>
+                <Text style={[styles.label, styles.priorityClean]}>Status: </Text>
+                <Text style={[styles.value, styles.priorityClean]}>
+                  Cleaned
+                </Text>
               </Text>
-            </Text>
-            <Text style={styles.row} numberOfLines={1} ellipsizeMode="tail">
-              <Text style={styles.label}>Email: </Text>
-              <Text style={styles.value}>{item.email}</Text>
-            </Text>
-            <Text style={styles.row} numberOfLines={1} ellipsizeMode="tail">
-              <Text style={styles.label}>Priority: </Text>
-              <Text style={styles.value}>{item.priority || 'N/A'}</Text>
-            </Text>
-             {item.isClean && (
-                 <Text style={styles.row} numberOfLines={1} ellipsizeMode="tail">
-                   <Text style={[styles.label, { color: '#4CAF50' }]}>Status: </Text>
-                   <Text style={[styles.value, { color: '#4CAF50' }]}>Cleaned</Text>
-                 </Text>
-             )}
-            <Text style={styles.row} numberOfLines={1} ellipsizeMode="tail">
+            )}
+            <Text style={styles.row}>
               <Text style={styles.label}>Reported: </Text>
               <Text style={styles.value}>
                 {new Date(item.reportedAt).toLocaleDateString()}
@@ -223,30 +330,33 @@ const Dashboard = ({ navigation }) => {
             </Text>
           </View>
           <View style={styles.reportMapContainer}>
-            {validCoordinates && REACT_APP_GOOGLE_MAPS_API_KEY ? (
+            {valid && REACT_APP_GOOGLE_MAPS_API_KEY ? (
               <TouchableOpacity
                 style={styles.mapTouchable}
-                onPress={() => setSelectedReport(item)}
+                onPress={() => openInGoogleMaps(lat, lon)}
                 activeOpacity={0.7}
               >
                 <MapView
                   provider={PROVIDER_GOOGLE}
                   style={styles.reportMap}
-                  initialRegion={initialRegion}
+                  region={region}
                   scrollEnabled={false}
                   zoomEnabled={false}
                   pitchEnabled={false}
                   rotateEnabled={false}
                   toolbarEnabled={false}
-                  liteMode={true}
+                  liteMode
                 >
-                  <Marker coordinate={{ latitude: lat, longitude: lon }} />
+                  <Marker
+                    coordinate={{ latitude: lat, longitude: lon }}
+                    pinColor="red"
+                  />
                 </MapView>
               </TouchableOpacity>
             ) : (
               <View style={styles.noLocationContainer}>
                 <Text style={styles.noLocationText}>
-                  {!validCoordinates ? 'No location data' : 'Map disabled (API Key)'}
+                  {valid ? 'Map N/A' : 'No location'}
                 </Text>
               </View>
             )}
@@ -254,168 +364,191 @@ const Dashboard = ({ navigation }) => {
         </View>
         <View style={styles.reportButtons}>
           {!item.isClean && (
-             <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#FF5252' }]}
-                onPress={() => deleteReport(item._id)}
-             >
-                <Text style={styles.actionButtonText}>Delete</Text>
-             </TouchableOpacity>
-           )}
+            <TouchableOpacity
+              style={[styles.actionButton, { backgroundColor: '#FF5252' }]}
+              onPress={() => deleteReport(item._id)}
+            >
+              <Text style={styles.actionButtonText}>Delete</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     );
   };
 
-  const renderModalMap = () => {
-    if (!selectedReport) return null;
-
-    const lat = parseFloat(selectedReport.latitude);
-    const lon = parseFloat(selectedReport.longitude);
-    const validCoordinates = isValidLatLng(lat, lon);
-
-    return (
+  // Profile modal
+  const renderProfileModal = () =>
+    showProfileModal && (
       <Modal
+        visible
+        transparent
         animationType="slide"
-        transparent={true}
-        visible={true}
-        onRequestClose={() => setSelectedReport(null)}
+        onRequestClose={() => setShowProfileModal(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
-            <Text style={styles.modalHeader}>Report Location</Text>
-            {validCoordinates && REACT_APP_GOOGLE_MAPS_API_KEY ? (
-              <MapView
-                provider={PROVIDER_GOOGLE}
-                style={styles.modalMap}
-                loadingEnabled={true}
-                initialRegion={{
-                  latitude: lat,
-                  longitude: lon,
-                  latitudeDelta: 0.005,
-                  longitudeDelta: 0.005,
-                }}
-                showsUserLocation={true}
-                showsMyLocationButton={true}
-              >
-                <Marker
-                  coordinate={{ latitude: lat, longitude: lon }}
-                  title="Reported Location"
-                  description={`Coords: ${lat.toFixed(4)}, ${lon.toFixed(4)}`}
-                />
-              </MapView>
+            <Text style={styles.modalHeader}>Your Profile</Text>
+            {uploading ? (
+              <ActivityIndicator size="large" color="#03DAC6" style={{ marginVertical: 20 }} />
+            ) : profilePhotoUri ? (
+              <Image source={{ uri: profilePhotoUri }} style={styles.profilePhotoLarge} />
             ) : (
-              <Text style={styles.noLocationTextLarge}>
-                {!validCoordinates ? 'No valid location data available for this report.' : 'Map disabled due to missing API Key.'}
-              </Text>
+              <View style={[styles.profilePhotoLarge, styles.avatarPlaceholder]}>
+                <Text style={styles.avatarPlaceholderText}>
+                  {userEmail.charAt(0).toUpperCase()}
+                </Text>
+              </View>
             )}
+            <Text style={styles.profileEmail}>{userEmail}</Text>
+            <TouchableOpacity style={styles.modalButton} onPress={pickOrTakePhoto}>
+              <Text style={styles.modalButtonText}>
+                {profilePhotoUri ? 'Change Photo' : 'Add Photo'}
+              </Text>
+            </TouchableOpacity>
             <TouchableOpacity
-              style={styles.closeModalButton}
-              onPress={() => setSelectedReport(null)}
+              style={[styles.modalButton, styles.logoutModalButton]}
+              onPress={() => {
+                auth.signOut();
+                setShowProfileModal(false);
+              }}
             >
-              <Text style={styles.closeModalButtonText}>Close Map</Text>
+              <Text style={styles.modalButtonText}>Logout</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.cancelButton]}
+              onPress={() => setShowProfileModal(false)}
+            >
+              <Text style={styles.modalButtonText}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
     );
-  };
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1E1E1E" />
 
-      <View style={styles.topSection}>
-        <View style={styles.navbar}>
-          <Text style={styles.navbarTitle}>Dashboard</Text>
-          <View style={styles.navbarRight}>
-            <Text style={styles.username} numberOfLines={1} ellipsizeMode="tail">
-              {userEmail || 'Guest'}
-            </Text>
-            <TouchableOpacity
-              style={styles.logoutButton}
-              onPress={() => {
-                console.log("[Dashboard] Logout pressed.");
-                auth.signOut();
-              }}
-            >
-              <Text style={styles.logoutText}>Logout</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+      {/* Navbar with avatar only */}
+      <View style={styles.navbar}>
+        <Text style={styles.navbarTitle}>Dashboard</Text>
+        <TouchableOpacity
+          style={styles.avatarContainer}
+          onPress={() => setShowProfileModal(true)}
+        >
+          {profilePhotoUri ? (
+            <Image source={{ uri: profilePhotoUri }} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatar, styles.avatarPlaceholder]}>
+              <Text style={styles.avatarPlaceholderText}>
+                {userEmail.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
 
-        <Text style={styles.header}>Your Location Reports</Text>
+      {/* Filter Bar */}
+      <View style={styles.filterBar}>
+        <TouchableOpacity
+          style={[styles.filterButton, filterSelection === 'all' && styles.filterButtonActive]}
+          onPress={() => handleFilter('all')}
+        >
+          <Text style={[styles.filterButtonText, filterSelection === 'all' && styles.filterButtonTextActive]}>
+            All ({reports.length})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterButton, styles.filterButtonHigh, filterSelection === 'high' && styles.filterButtonActive]}
+          onPress={() => handleFilter('high')}
+        >
+          <Text style={[styles.filterButtonText, filterSelection === 'high' && styles.filterButtonTextActive]}>
+            High ({reports.filter(r => !r.isClean && r.priority === 'high').length})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterButton, styles.filterButtonMedium, filterSelection === 'medium' && styles.filterButtonActive]}
+          onPress={() => handleFilter('medium')}
+        >
+          <Text style={[styles.filterButtonText, filterSelection === 'medium' && styles.filterButtonTextActive]}>
+            Medium ({reports.filter(r => !r.isClean && r.priority === 'medium').length})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterButton, styles.filterButtonLow, filterSelection === 'low' && styles.filterButtonActive]}
+          onPress={() => handleFilter('low')}
+        >
+          <Text style={[styles.filterButtonText, filterSelection === 'low' && styles.filterButtonTextActive]}>
+            Low ({reports.filter(r => !r.isClean && r.priority === 'low').length})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterButton, styles.filterButtonClean, filterSelection === 'clean' && styles.filterButtonActive]}
+          onPress={() => handleFilter('clean')}
+        >
+          <Text style={[styles.filterButtonText, filterSelection === 'clean' && styles.filterButtonTextActive]}>
+            Clean ({reports.filter(r => r.isClean).length})
+          </Text>
+        </TouchableOpacity>
+      </View>
 
-        {loading ? (
-          <ActivityIndicator size="large" color="#1E90FF" style={styles.loader} />
-        ) : reports.length > 0 ? (
+      {/* Main content: list or loading/empty state */}
+      <View style={styles.listArea}>
+        {loading && !reports.length ? (
+          <ActivityIndicator style={styles.loader} size="large" color="#1E90FF" />
+        ) : !loading && !filteredAndSorted.length ? (
+          <Text style={styles.noReportsText}>
+            {userEmail ? `No reports for '${filterSelection}'.` : 'Please log in.'}
+          </Text>
+        ) : (
           <FlatList
-            data={currentReports}
-            keyExtractor={(item) => item._id.toString()}
+            data={pageItems}
+            keyExtractor={(i) => i._id}
             renderItem={renderReport}
-            numColumns={3}
             contentContainerStyle={styles.reportList}
-            columnWrapperStyle={styles.listColumnWrapper}
             initialNumToRender={itemsPerPage}
             maxToRenderPerBatch={itemsPerPage}
             windowSize={5}
-            removeClippedSubviews={true}
+            removeClippedSubviews={false}
           />
-        ) : (
-          <Text style={styles.noReportsText}>
-            {userEmail ? 'You have not submitted any reports yet.' : 'Please log in to view your reports.'}
-          </Text>
-        )}
-
-        {totalPages > 1 && (
-          <View style={styles.pagination}>
-            <TouchableOpacity
-              onPress={() => setCurrentPage((prev) => Math.max(prev - 1, 0))}
-              disabled={currentPage === 0 || loading}
-              style={[
-                styles.pageButton,
-                (currentPage === 0 || loading) && styles.disabledButton,
-              ]}
-            >
-              <Text style={styles.pageButtonText}>Previous</Text>
-            </TouchableOpacity>
-
-            <Text style={styles.pageInfo}>
-              Page {currentPage + 1} of {totalPages}
-            </Text>
-
-            <TouchableOpacity
-              onPress={() =>
-                setCurrentPage((prev) => Math.min(prev + 1, totalPages - 1))
-              }
-              disabled={currentPage >= totalPages - 1 || loading}
-              style={[
-                styles.pageButton,
-                (currentPage >= totalPages - 1 || loading) && styles.disabledButton,
-              ]}
-            >
-              <Text style={styles.pageButtonText}>Next</Text>
-            </TouchableOpacity>
-          </View>
         )}
       </View>
 
+      {/* Pagination controls */}
+      {!loading && filteredAndSorted.length > itemsPerPage && totalPages > 1 && (
+        <View style={styles.pagination}>
+          <TouchableOpacity
+            style={[styles.pageButton, currentPage === 0 && styles.disabledButton]}
+            disabled={currentPage === 0}
+            onPress={() => setCurrentPage((p) => Math.max(p - 1, 0))}
+          >
+            <Text style={styles.pageButtonText}>Prev</Text>
+          </TouchableOpacity>
+          <Text style={styles.pageInfo}>
+            Page {currentPage + 1} of {totalPages}
+          </Text>
+          <TouchableOpacity
+            style={[styles.pageButton, currentPage >= totalPages - 1 && styles.disabledButton]}
+            disabled={currentPage >= totalPages - 1}
+            onPress={() => setCurrentPage((p) => Math.min(p + 1, totalPages - 1))}
+          >
+            <Text style={styles.pageButtonText}>Next</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
-       <TouchableOpacity
-         style={[styles.reportButton, { marginBottom: 10, backgroundColor: '#03DAC6' }]}
-         onPress={() => navigation.navigate('CleanerTasks')}
-       >
-         <Text style={[styles.reportButtonText, { color: '#121212' }]}>View Cleanup Tasks</Text>
-       </TouchableOpacity>
+      {/* Bottom buttons */}
+      <View style={styles.bottomButtonContainer}>
+        <TouchableOpacity style={[styles.reportButton, { backgroundColor: '#03DAC6' }]} onPress={() => navigation.navigate('CleanerTasks')}>
+          <Text style={[styles.reportButtonText, { color: '#121212' }]}>View Cleanup Tasks</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.reportButton} onPress={() => navigation.navigate('Map')}>
+          <Text style={styles.reportButtonText}>Report Litter Now</Text>
+        </TouchableOpacity>
+      </View>
 
-
-      <TouchableOpacity
-        style={styles.reportButton}
-        onPress={() => navigation.navigate('Map')}
-      >
-        <Text style={styles.reportButtonText}>Report Litter Now</Text>
-      </TouchableOpacity>
-
-      {renderModalMap()}
+      {/* Profile modal */}
+      {renderProfileModal()}
     </View>
   );
 };

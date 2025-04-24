@@ -1,11 +1,18 @@
-import { StyleSheet, Dimensions } from 'react-native';
+import { StyleSheet, Dimensions, Platform, StatusBar } from 'react-native'; // Added Platform, StatusBar
 
-const { width } = Dimensions.get('window');
-const numColumns = 3;
-const screenPadding = 10 * 2;
-const cardMargin = 5 * 2 * numColumns;
-const availableWidth = width - screenPadding - cardMargin;
-const cardWidth = availableWidth / numColumns;
+// Function to determine card width based on screen size and desired columns
+const getCardWidth = () => {
+  const screenWidth = Dimensions.get('window').width;
+  const columns = screenWidth < 600 ? 1 : 3; // Use 1 column for smaller screens
+  const screenPadding = 10 * 2;
+  const cardMargin = columns > 1 ? 5 * 2 * columns : 0;
+  const availableWidth = screenWidth - screenPadding - cardMargin;
+  return columns === 1 ? screenWidth - screenPadding : availableWidth / columns;
+};
+
+const cardWidth = getCardWidth();
+// *** EXPORT this flag so the component can use it ***
+export const isSingleColumn = cardWidth === Dimensions.get('window').width - (10 * 2);
 
 const styles = StyleSheet.create({
   container: {
@@ -13,7 +20,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#121212',
   },
   headerBar: {
-    paddingTop: 15,
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 15,
     paddingBottom: 10,
     paddingHorizontal: 15,
     backgroundColor: '#1E1E1E',
@@ -32,7 +39,7 @@ const styles = StyleSheet.create({
   backButton: {
       position: 'absolute',
       left: 15,
-      top: 0,
+      top: Platform.OS === 'android' ? StatusBar.currentHeight : 15,
       bottom: 0,
       justifyContent: 'center',
       paddingRight: 10,
@@ -43,22 +50,21 @@ const styles = StyleSheet.create({
   },
   filterBar: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    alignItems: 'center',
     backgroundColor: '#1E1E1E',
     paddingVertical: 10,
     paddingHorizontal: 5,
     borderBottomWidth: 1,
     borderBottomColor: '#333',
-    flexWrap: 'wrap',
   },
   filterButton: {
     paddingVertical: 6,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     borderRadius: 15,
     borderWidth: 1,
     borderColor: '#555',
-    marginHorizontal: 3,
-    marginBottom: 5,
+    marginHorizontal: 4,
+    alignSelf: 'center',
   },
   filterButtonActive: {
     borderColor: '#BB86FC',
@@ -85,6 +91,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
   errorContainer: {
       flex: 1,
@@ -123,77 +130,80 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
   },
   listColumnWrapper: {
+    // Only applied when numColumns > 1 by FlatList logic
     justifyContent: 'flex-start',
     marginBottom: 10,
   },
   reportCard: {
     backgroundColor: '#1E1E1E',
     borderRadius: 8,
-    marginHorizontal: 5,
-    padding: 8,
+    marginHorizontal: isSingleColumn ? 0 : 5,
+    marginBottom: isSingleColumn ? 10 : 0, // Add bottom margin only for single column
+    padding: 10,
     width: cardWidth,
-    minHeight: 160,
+    minHeight: isSingleColumn ? 120 : 160,
     elevation: 3,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.2,
     shadowRadius: 2,
-    justifyContent: 'space-between',
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 5,
-    paddingBottom: 3,
+    marginBottom: 6,
+    paddingBottom: 4,
     borderBottomWidth: 1,
     borderBottomColor: '#333',
   },
   priorityText: {
-    fontSize: 11,
+    fontSize: isSingleColumn ? 13 : 11,
     fontWeight: 'bold',
     flexShrink: 1,
     marginRight: 4,
   },
   dateText: {
-    fontSize: 9,
+    fontSize: isSingleColumn ? 11 : 9,
     color: '#A0A0A0',
   },
   cardBody: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     flex: 1,
     marginTop: 4,
   },
   textContainer: {
-    flex: 3,
-    paddingRight: 5,
-    justifyContent: 'space-around',
+    flex: isSingleColumn ? 4 : 3,
+    paddingRight: 8,
+    justifyContent: 'space-between',
   },
   locationText: {
-    fontSize: 11,
+    fontSize: isSingleColumn ? 14 : 11,
     fontWeight: '500',
     color: '#E0E0E0',
-    marginBottom: 2,
+    marginBottom: 3,
   },
   coordsText: {
-    fontSize: 10,
+    fontSize: isSingleColumn ? 12 : 10,
     color: '#A0A0A0',
-    marginBottom: 2,
+    marginBottom: 3,
   },
   reporterText: {
-    fontSize: 9,
+    fontSize: isSingleColumn ? 11 : 9,
     color: '#888',
     fontStyle: 'italic',
+    marginTop: 2,
   },
   mapContainer: {
-    flex: 2,
-    height: 60,
+    flex: isSingleColumn ? 2 : 2,
+    height: isSingleColumn ? 100 : 60,
+    minWidth: 60,
     borderRadius: 4,
     overflow: 'hidden',
     backgroundColor: '#333333',
     justifyContent: 'center',
     alignItems: 'center',
+    position: 'relative',
   },
   noMapContainer: {
      borderWidth: 1,
@@ -206,6 +216,13 @@ const styles = StyleSheet.create({
      fontSize: 10,
      color: '#999',
      textAlign: 'center',
+  },
+  mapLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 4,
   },
   priorityLow: { color: '#FFEB3B' },
   priorityMedium: { color: '#FF9800' },
@@ -247,6 +264,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 30,
+    paddingHorizontal: 10,
   },
   modalContainer: {
     width: '90%',
@@ -254,12 +272,13 @@ const styles = StyleSheet.create({
     maxHeight: '95%',
     backgroundColor: '#2C2C2C',
     borderRadius: 15,
-    padding: 5,
+    paddingBottom: 0,
     elevation: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.4,
     shadowRadius: 5,
+    overflow: 'hidden',
   },
    modalScrollView: {
     paddingHorizontal: 15,
@@ -274,7 +293,7 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   modalDetailRow: {
-    marginBottom: 8,
+    marginBottom: 10,
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
@@ -295,7 +314,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderTopWidth: 1,
     borderTopColor: '#444',
-    paddingTop: 10,
+    paddingTop: 15,
   },
   evidenceImage: {
     width: '90%',
@@ -310,12 +329,26 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: 'hidden',
     marginTop: 15,
-    marginBottom: 10,
+    marginBottom: 5,
     borderWidth: 1,
     borderColor: '#444',
+    position: 'relative',
   },
   modalMap: {
     ...StyleSheet.absoluteFillObject,
+  },
+  openMapButton: {
+    backgroundColor: '#1E90FF',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 5,
+    alignSelf: 'center',
+    marginTop: 8,
+  },
+  openMapButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   modalActions: {
     flexDirection: 'row',
@@ -324,20 +357,23 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderTopWidth: 1,
     borderTopColor: '#444',
+    backgroundColor: '#2C2C2C',
   },
   modalButton: {
     paddingVertical: 10,
-    paddingHorizontal: 20,
+    paddingHorizontal: 15,
     borderRadius: 20,
-    minWidth: 100,
+    flexGrow: 1,
+    marginHorizontal: 5,
     alignItems: 'center',
     justifyContent: 'center',
-    marginHorizontal: 5,
+    minWidth: 100,
   },
   modalButtonText: {
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: 'bold',
+    textAlign: 'center',
   },
   cancelButton: {
     backgroundColor: '#607d8b',
@@ -348,10 +384,12 @@ const styles = StyleSheet.create({
   addPhotoButton: {
      backgroundColor: '#03A9F4',
      marginTop: 5,
+     flexGrow: 0,
   },
   changePhotoButton: {
      backgroundColor: '#FFC107',
      marginTop: 5,
+     flexGrow: 0,
   },
   modalErrorText: {
       color: '#FF7043',
@@ -361,4 +399,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default styles;
+export default styles; // Default export

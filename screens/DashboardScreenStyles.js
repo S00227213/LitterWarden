@@ -1,72 +1,104 @@
-import { StyleSheet, Dimensions } from 'react-native';
+import { StyleSheet, Dimensions, Platform, StatusBar } from 'react-native';
 
 const { width } = Dimensions.get('window');
-const numColumns = 3;
-const screenPadding = 20 * 2;
-const cardMargin = 5 * 2 * numColumns;
-const availableWidth = width - screenPadding - cardMargin;
-const cardWidth = availableWidth / numColumns;
+const H_PAD = 20;
 
-const styles = StyleSheet.create({
-  // Layout
+export default StyleSheet.create({
+  // Container
   container: {
     flex: 1,
     backgroundColor: '#121212',
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 20,
     paddingBottom: 10,
-    justifyContent: 'space-between',
   },
-  topSection: {
-    flex: 1,
-    marginBottom: 10,
-  },
+
   // Navbar
   navbar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    paddingHorizontal: H_PAD,
+    marginBottom: 8,
   },
   navbarTitle: {
-    fontSize: 26,
+    fontSize: 28,
     fontWeight: '700',
     color: '#FFFFFF',
   },
-  navbarRight: {
-    flexDirection: 'row',
+
+  // Avatar only in navbar right
+  avatarContainer: {
+    marginRight: 12,
+  },
+  avatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  avatarPlaceholder: {
+    backgroundColor: '#444',
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  username: {
-    fontSize: 14,
-    color: '#BB86FC',
-    marginRight: 12,
-    maxWidth: width * 0.3,
-  },
-  logoutButton: {
-    backgroundColor: '#333333',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 15,
-  },
-  logoutText: {
+  avatarPlaceholderText: {
     color: '#FFFFFF',
-    fontSize: 14,
-  },
-  // Header
-  header: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '600',
-    marginBottom: 15,
-    color: '#FFFFFF',
-    textAlign: 'center',
   },
-  // Loader / No Reports
+
+  // Filter Bar
+  filterBar: {
+    flexDirection: 'row',
+    backgroundColor: '#1E1E1E',
+    paddingVertical: 6,
+    paddingHorizontal: H_PAD,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+    marginBottom: 12,
+  },
+  filterButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#555',
+    marginRight: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 32,
+  },
+  filterButtonActive: {
+    backgroundColor: 'rgba(187,134,252,0.2)',
+    borderColor: '#BB86FC',
+  },
+  filterButtonHigh: { borderColor: '#F44336' },
+  filterButtonMedium: { borderColor: '#FF9800' },
+  filterButtonLow: { borderColor: '#FFEB3B' },
+  filterButtonClean: { borderColor: '#4CAF50' },
+  filterButtonText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#A0A0A0',
+  },
+  filterButtonTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+
+  // Main list area
+  listArea: {
+    flex: 1,
+    paddingHorizontal: H_PAD,
+  },
+  reportList: {
+    paddingBottom: 20,
+  },
   loader: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    minHeight: 200,
+    minHeight: 150,
   },
   noReportsText: {
     flex: 1,
@@ -74,25 +106,16 @@ const styles = StyleSheet.create({
     color: '#B0B0B0',
     textAlign: 'center',
     marginTop: 40,
-    paddingHorizontal: 20,
-    minHeight: 200,
+    paddingHorizontal: H_PAD,
+    minHeight: 150,
   },
-  // Report List
-  reportList: {
-    paddingBottom: 10,
-  },
-  listColumnWrapper: {
-    justifyContent: 'flex-start',
-    marginBottom: 10,
-  },
+
+  // Report card
   reportCard: {
     backgroundColor: '#1E1E1E',
-    marginHorizontal: 5,
-    padding: 10,
-    borderRadius: 8,
-    width: cardWidth,
-    minHeight: 190,
-    justifyContent: 'space-between',
+    borderRadius: 10,
+    padding: 16,
+    marginBottom: 16,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
@@ -102,100 +125,99 @@ const styles = StyleSheet.create({
   reportRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 5,
-    flex: 1,
+    marginBottom: 12,
   },
   reportTextContainer: {
-    flex: 3,
-    paddingRight: 8,
-    justifyContent: 'space-between',
+    flex: 2.5,
+    paddingRight: 12,
+    justifyContent: 'flex-start',
   },
   row: {
-    marginBottom: 2,
+    marginBottom: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   label: {
-    fontSize: 11,
-    fontWeight: 'bold',
+    fontSize: 12,
+    fontWeight: '700',
     color: '#BB86FC',
   },
   value: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#E0E0E0',
     flexShrink: 1,
+    marginLeft: 4,
   },
-  // Report Map
+
+  // Priority colors
+  priorityHigh: { color: '#F44336' },
+  priorityMedium: { color: '#FF9800' },
+  priorityLow: { color: '#FFEB3B' },
+  priorityClean: { color: '#4CAF50' },
+
+  // Map preview
   reportMapContainer: {
-    flex: 2,
-    height: 90,
+    flex: 1.2,
+    minHeight: 100,
+    maxHeight: 120,
     borderRadius: 6,
     overflow: 'hidden',
-    backgroundColor: '#333333',
+    backgroundColor: '#2A2A2A',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  reportMap: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  mapTouchable: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  // No Location
+  reportMap: { ...StyleSheet.absoluteFillObject },
+  mapTouchable: { ...StyleSheet.absoluteFillObject },
   noLocationContainer: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 5,
+    padding: 8,
   },
   noLocationText: {
     fontSize: 10,
     color: '#999',
     textAlign: 'center',
   },
-  noLocationTextLarge: {
-    fontSize: 16,
-    color: '#555',
-    textAlign: 'center',
-    padding: 20,
-  },
-  // Report Buttons
+
+  // Action buttons in card
   reportButtons: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    marginTop: 8,
-    paddingTop: 5,
-    borderTopColor: '#333333',
     borderTopWidth: 1,
+    borderTopColor: '#333333',
+    paddingTop: 8,
   },
   actionButton: {
-    paddingVertical: 5,
-    paddingHorizontal: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
     borderRadius: 15,
-    minWidth: 50,
-    alignItems: 'center',
+    marginLeft: 8,
   },
   actionButtonText: {
-    color: '#FFFFFF',
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: '600',
+    color: '#FFFFFF',
   },
-  // Pagination
+
+  // Pagination controls
   pagination: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 15,
+    paddingVertical: 12,
+    paddingHorizontal: H_PAD,
   },
   pageButton: {
     backgroundColor: '#03DAC6',
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 20,
-    marginHorizontal: 10,
+    marginHorizontal: 12,
   },
   pageButtonText: {
-    color: '#121212',
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: '700',
+    color: '#121212',
   },
   disabledButton: {
     backgroundColor: '#555',
@@ -204,29 +226,36 @@ const styles = StyleSheet.create({
   pageInfo: {
     fontSize: 14,
     color: '#FFFFFF',
-    marginHorizontal: 10,
   },
-  // Report Button
-  reportButton: {
-    backgroundColor: '#BB86FC',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 25,
+
+  // Bottom action buttons
+  bottomButtonContainer: {
+    paddingHorizontal: H_PAD,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+    paddingTop: 10,
     alignItems: 'center',
-    alignSelf: 'center',
-    width: '60%',
-    elevation: 4,
+  },
+  reportButton: {
+    width: width - H_PAD * 2,
+    paddingVertical: 14,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 6,
+    elevation: 3,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
-    shadowRadius: 3,
+    shadowRadius: 4,
+    backgroundColor: '#BB86FC',
   },
   reportButtonText: {
-    color: '#121212',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '700',
+    color: '#121212',
   },
-  // Modal
+
+  // Modal overlay & container
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.7)',
@@ -234,42 +263,50 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContainer: {
-    backgroundColor: '#FFFFFF',
     width: '85%',
-    maxWidth: 400,
-    borderRadius: 10,
-    padding: 15,
+    backgroundColor: '#2C2C2C',
+    borderRadius: 12,
+    padding: 20,
     alignItems: 'center',
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 15,
   },
   modalHeader: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#121212',
-    marginBottom: 15,
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 16,
   },
-  modalMap: {
-    width: '100%',
-    height: 280,
-    borderRadius: 8,
-    marginBottom: 15,
+
+  // Profile modal specific
+  profilePhotoLarge: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#444',
+    marginBottom: 12,
   },
-  closeModalButton: {
-    backgroundColor: '#333333',
+  profileEmail: {
+    fontSize: 16,
+    color: '#E0E0E0',
+    marginBottom: 16,
+  },
+
+  // Modal buttons
+  modalButton: {
+    backgroundColor: '#03DAC6',
     paddingVertical: 10,
     paddingHorizontal: 20,
     borderRadius: 20,
-    marginTop: 10,
+    marginBottom: 10,
   },
-  closeModalButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
+  logoutModalButton: {
+    backgroundColor: '#FF5252',
+  },
+  cancelButton: {
+    backgroundColor: '#888',
+  },
+  modalButtonText: {
+    color: '#121212',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
-
-export default styles;

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import Toast from 'react-native-toast-message';
 import {
   View,
   Text,
@@ -31,6 +32,12 @@ import {
 } from '@env';
 
 import styles from './MapScreenStyles';
+
+import Sound from 'react-native-sound';
+Sound.setCategory('Playback');
+const successSound = new Sound('success.mp3', Sound.MAIN_BUNDLE, (err) => {
+  if (err) console.error('Failed to load success sound', err);
+});
 
 
 const SERVICE_UUID = '62f3511c-bbaa-416c-af55-d51cddce0e9f';
@@ -68,20 +75,7 @@ function haversineDistance(coords1, coords2) {
   return R * c;
 }
 
-const MapScreen = ({ navigation }) => {
-  const { width } = Dimensions.get('window');
-
-
-  const markerImages = useMemo(() => ({
-    low: require('../assets/low-warning.png'),
-    medium: require('../assets/medium-warning.png'),
-    high: require('../assets/high-warning.png'),
-    clean: require('../assets/clean.png'),
-  }), []);
-
-
-  const [location, setLocation] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const MapScreen = ({ navigation }) => {
   const [reports, setReports] = useState([]);
   const [userEmail, setUserEmail] = useState('');
   const [selectedReport, setSelectedReport] = useState(null);
@@ -93,6 +87,25 @@ const MapScreen = ({ navigation }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [isDeletingImage, setIsDeletingImage] = useState(false);
   const [expandedClusterId, setExpandedClusterId] = useState(null);
+    const markerImages = useMemo(() => ({
+      low: require('../assets/low-warning.png'),
+      medium: require('../assets/medium-warning.png'),
+      high: require('../assets/high-warning.png'),
+      clean: require('../assets/clean.png'),
+    }), []);
+    const { width } = Dimensions.get('window');
+    const [myReports, setMyReports] = useState([]);
+    const [newReportLocation, setNewReportLocation] = useState(null);
+
+    useEffect(() => {
+      if (!userEmail) return;
+      fetch(`${SERVER_URL}/reports?email=${encodeURIComponent(userEmail)}&includeClean=true`)
+        .then(r => r.json())
+        .then(data => setMyReports(data))
+        .catch(console.error);
+    }, [userEmail]);
+    const [location, setLocation] = useState(null);
+    const [loading, setLoading] = useState(true);
 
 
   const bleManager = useRef(new BleManager()).current;
@@ -716,25 +729,50 @@ const MapScreen = ({ navigation }) => {
 
       if (response.ok && responseData.report) {
 
-        console.log("Report successfully submitted:", responseData.report);
-        Alert.alert('Report Sent', `Your ${priority} priority litter report has been submitted successfully.`);
+        if (successSound) {
+            successSound.stop(() => {
+                successSound.play((success) => {
+                    if (success) { console.log('Played success.mp3'); }
+                    else { console.warn('Sound playback failed:', successSound.getError()); }
+                });
+            });
+        } else { console.warn("successSound object not available."); }
+
+        const priorityFormatted = priority.charAt(0).toUpperCase() + priority.slice(1);
+        Toast.show({
+          type: 'success',
+          text1: 'Litter Report Submitted',
+          text2: `Priority: ${priorityFormatted}`,
+          position: 'bottom',
+          visibilityTime: 3000
+        });
 
         setReports((prevReports) => [responseData.report, ...prevReports]);
 
       } else {
-
-        const errorMessage = responseData.error || `Server responded with status ${response.status}`;
-        console.error("Error submitting report:", errorMessage, responseData);
-        Alert.alert('Error Sending Report', `Failed to submit report: ${errorMessage}`);
+        const errorMessage = responseData.error || `Server error ${response.status}`;
+        console.error('Error submitting report:', errorMessage);
+        Toast.show({
+            type: 'error',
+            text1: 'Error Sending Report',
+            text2: `Failed: ${errorMessage}`,
+            position: 'bottom',
+            visibilityTime: 4000
+        });
         setLastError(`Report submission failed: ${errorMessage}`);
       }
+
     } catch (error) {
-
-      console.error("Network error during report submission:", error);
-      Alert.alert('Network Error', `Could not connect to the server to submit the report: ${error.message}`);
-      setLastError(`Network error: ${error.message}`);
+      console.error("Report Submission Catch Error:", error);
+      Toast.show({
+          type: 'error',
+          text1: 'Submission Failed',
+          text2: error.message || 'Could not connect to server.',
+          position: 'bottom',
+          visibilityTime: 4000
+      });
+      setLastError(`Report failed: ${error.message}`);
     } finally {
-
       setShowPriorityModal(false);
     }
   }, [userEmail, location, getAddressFromCoords, fetchReports]);
