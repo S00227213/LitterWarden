@@ -24,62 +24,51 @@ const {
   PORT = 10000
 } = process.env;
 
-// --- sanity checks
 if (!MONGO_URI) {
-  console.error("FATAL: MONGO_URI missing.");
+  console.error("FATAL ERROR: MONGO_URI environment variable is not set.");
   process.exit(1);
 }
-if (!GOOGLE_MAPS_API_KEY) {
-  console.warn("Warning: GOOGLE_MAPS_API_KEY missing.");
-}
-if (!AZURE_CV_KEY || !AZURE_CV_ENDPOINT) {
-  console.warn("Warning: AZURE_CV_KEY or AZURE_CV_ENDPOINT missing.");
-}
-if (!S3_BUCKET_NAME) {
-  console.warn("Warning: S3_BUCKET_NAME missing.");
-}
-if (!AWS_REGION) {
-  console.warn("Warning: AWS_REGION missing.");
-}
-if (!AWS_ACCESS_KEY_ID) {
-  console.warn("Warning: AWS_ACCESS_KEY_ID missing.");
-}
-if (!AWS_SECRET_ACCESS_KEY) {
-  console.warn("Warning: AWS_SECRET_ACCESS_KEY missing.");
-}
+if (!GOOGLE_MAPS_API_KEY) console.warn("Warning: GOOGLE_MAPS_API_KEY is not set. Geocoding fallback may fail.");
+if (!AZURE_CV_KEY || !AZURE_CV_ENDPOINT) console.warn("Warning: AZURE_CV_KEY or AZURE_CV_ENDPOINT is not set. Image analysis will be skipped.");
+if (!S3_BUCKET_NAME) console.warn("Warning: S3_BUCKET_NAME is not set. S3 operations might fail.");
+if (!AWS_REGION) console.warn("Warning: AWS_REGION is not set.");
+if (!AWS_ACCESS_KEY_ID) console.warn("Warning: AWS_ACCESS_KEY_ID is not set.");
+if (!AWS_SECRET_ACCESS_KEY) console.warn("Warning: AWS_SECRET_ACCESS_KEY is not set.");
 
-// --- S3 client for deletes
 let s3Client;
 if (AWS_REGION && AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY && S3_BUCKET_NAME) {
-  s3Client = new S3Client({
-    region: AWS_REGION,
-    credentials: {
-      accessKeyId: AWS_ACCESS_KEY_ID,
-      secretAccessKey: AWS_SECRET_ACCESS_KEY,
-    }
-  });
-  console.log(`S3 Client configured for region: ${AWS_REGION}`);
+  try {
+    s3Client = new S3Client({
+      region: AWS_REGION,
+      credentials: {
+        accessKeyId: AWS_ACCESS_KEY_ID,
+        secretAccessKey: AWS_SECRET_ACCESS_KEY,
+      }
+    });
+    console.log(`S3 Client configured successfully for region: ${AWS_REGION}`);
+  } catch (error) {
+    console.error("Error configuring S3 Client:", error);
+    s3Client = null;
+  }
 } else {
-  console.warn("S3 Client not configured due to missing credentials.");
+  console.warn("S3 Client not configured due to missing AWS credentials or S3_BUCKET_NAME.");
   s3Client = null;
 }
 
-// --- connect to Mongo
 mongoose.connect(MONGO_URI)
-  .then(() => console.log('MongoDB Connected'))
+  .then(() => console.log('MongoDB Connected Successfully'))
   .catch(err => {
-    console.error('MongoDB connection error:', err);
+    console.error('MongoDB Connection Error:', err.message || err);
     process.exit(1);
   });
 
-// --- Report schema/model
 const reportSchema = new mongoose.Schema({
   latitude:         { type: Number, required: true, index: true },
   longitude:        { type: Number, required: true, index: true },
   town:             { type: String, default: 'Unknown', trim: true },
   county:           { type: String, default: 'Unknown', trim: true },
   country:          { type: String, default: 'Unknown', trim: true },
-  priority:         { type: String, enum: ['low','medium','high'], required: true },
+  priority:         { type: String, enum: ['low', 'medium', 'high'], required: true, index: true },
   email:            { type: String, required: true, lowercase: true, trim: true, index: true },
   reportedAt:       { type: Date, default: Date.now, index: true },
   imageUrl:         { type: String, default: null, trim: true },
@@ -88,47 +77,56 @@ const reportSchema = new mongoose.Schema({
 });
 const Report = mongoose.model('Report', reportSchema, 'reports');
 
-// --- geocode helper (server‐side fallback)
 async function getAddressFromCoordsServer(latitude, longitude) {
   if (!GOOGLE_MAPS_API_KEY) {
-    return { town:'Skipped', county:'Skipped', country:'Skipped' };
+    console.warn("Skipping server-side geocoding: GOOGLE_MAPS_API_KEY not set.");
+    return { town: 'Skipped', county: 'Skipped', country: 'Skipped' };
   }
   const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`;
   try {
     const resp = await fetch(url);
     const data = await resp.json();
-    if (data.status === 'OK' && data.results.length) {
+    if (data.status === 'OK' && data.results?.[0]?.address_components) {
       let town, county, country;
-      data.results[0].address_components.forEach(c => {
-        if (c.types.includes('locality')) town = c.long_name;
-        else if (c.types.includes('administrative_area_level_2')) county = c.long_name;
-        else if (c.types.includes('country')) country = c.long_name;
-      });
+      for (const component of data.results[0].address_components) {
+        if (component.types.includes('locality')) town = component.long_name;
+        else if (component.types.includes('postal_town') && !town) town = component.long_name;
+        else if (component.types.includes('administrative_area_level_2')) county = component.long_name;
+        else if (component.types.includes('administrative_area_level_1') && !county) county = component.long_name;
+        else if (component.types.includes('country')) country = component.long_name;
+      }
       return {
-        town:   town   || 'Unknown',
+        town: town || 'Unknown',
         county: county || 'Unknown',
-        country:country || 'Unknown'
+        country: country || 'Unknown'
       };
+    } else {
+      console.warn(`Geocoding API status: ${data.status}`, data.error_message || '');
+      return { town: 'Lookup Failed', county: 'Lookup Failed', country: 'Lookup Failed' };
     }
-    return { town:'Failed', county:'Failed', country:'Failed' };
   } catch (e) {
-    console.error('Geocode error:', e);
-    return { town:'Error', county:'Error', country:'Error' };
+    console.error('Server-side geocoding fetch error:', e);
+    return { town: 'Geocode Error', county: 'Geocode Error', country: 'Geocode Error' };
   }
 }
 
-// --- image analysis helper
 async function analyzeImageWithAzure(imageUrl) {
-  if (!AZURE_CV_KEY || !AZURE_CV_ENDPOINT || !imageUrl) {
+  if (!AZURE_CV_KEY || !AZURE_CV_ENDPOINT) {
+    console.warn("Skipping Azure analysis: Credentials not set.");
     return 'Analysis Skipped';
   }
+  if (!imageUrl) return 'Analysis Skipped - No URL';
   try {
     new URL(imageUrl);
   } catch {
+    console.warn("Skipping Azure analysis: Invalid image URL format:", imageUrl);
     return 'Analysis Failed - Invalid URL';
   }
+
+  const requestUrl = `${AZURE_CV_ENDPOINT.replace(/\/$/, '')}/computervision/imageanalysis:analyze?api-version=2023-02-01-preview&features=tags,caption`;
+
   try {
-    const resp = await fetch(AZURE_CV_ENDPOINT, {
+    const resp = await fetch(requestUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -136,215 +134,340 @@ async function analyzeImageWithAzure(imageUrl) {
       },
       body: JSON.stringify({ url: imageUrl })
     });
+
+    const responseBody = await resp.text();
     if (!resp.ok) {
-      const txt = await resp.text();
-      console.error(`Azure API error ${resp.status}:`, txt);
-      return 'Analysis Failed';
+      console.error(`Azure API error ${resp.status}:`, responseBody);
+      return `Analysis Failed (${resp.status})`;
     }
-    const data = await resp.json();
-    let category = 'Analysis Done - Unknown';
-    if (data.description?.captions?.length) {
-      category = data.description.captions[0].text;
+
+    const data = JSON.parse(responseBody);
+    const relevantTags = ['trash', 'waste', 'litter', 'garbage', 'pollution', 'dump', 'rubbish', 'plastic', 'bottle', 'can', 'debris'];
+    const foundTag = data.tagsResult?.values?.find(tag => relevantTags.includes(tag.name.toLowerCase()));
+
+    if (foundTag) {
+        return foundTag.name.charAt(0).toUpperCase() + foundTag.name.slice(1);
+    } else if (data.captionResult?.text) {
+        return data.captionResult.text;
+    } else if (data.tagsResult?.values?.length) {
+        return data.tagsResult.values[0].name.charAt(0).toUpperCase() + data.tagsResult.values[0].name.slice(1);
+    } else {
+        return 'Analysis Complete - No Category';
     }
-    if (data.tags?.length) {
-      const tag = data.tags.find(t => ['trash','waste','litter','garbage','pollution','dump','rubbish','plastic','bottle','can'].includes(t.name.toLowerCase()));
-      if (tag) category = tag.name.charAt(0).toUpperCase() + tag.name.slice(1);
-      else category = data.tags[0].name.charAt(0).toUpperCase() + data.tags[0].name.slice(1);
-    }
-    return category;
   } catch (e) {
-    console.error('Azure analysis error:', e);
-    return 'Analysis Error';
+    console.error('Azure analysis request error:', e);
+    return 'Analysis Network Error';
   }
 }
 
-// --- delete S3 object
 async function deleteS3Object(imageUrl) {
   if (!s3Client) {
-    console.warn('Skipping S3 delete: client not configured.');
+    console.warn("Skipping S3 delete: S3 client not configured.");
     return false;
   }
   let key = '';
-  const p1 = `https://${S3_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/`;
-  const p2 = `https://s3.${AWS_REGION}.amazonaws.com/${S3_BUCKET_NAME}/`;
-  if (imageUrl.startsWith(p1)) key = decodeURIComponent(imageUrl.slice(p1.length));
-  else if (imageUrl.startsWith(p2)) key = decodeURIComponent(imageUrl.slice(p2.length));
+  const urlPrefixes = [
+    `https://${S3_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/`,
+    `https://s3.${AWS_REGION}.amazonaws.com/${S3_BUCKET_NAME}/`,
+  ];
+
+  for (const prefix of urlPrefixes) {
+    if (imageUrl.startsWith(prefix)) {
+      key = decodeURIComponent(imageUrl.substring(prefix.length));
+      break;
+    }
+  }
+
   if (!key) {
-    console.warn('URL not in bucket, skipping delete:', imageUrl);
+    console.warn('Could not extract S3 key from URL, skipping delete:', imageUrl);
     return false;
   }
+
   try {
-    await s3Client.send(new DeleteObjectCommand({
+    const command = new DeleteObjectCommand({
       Bucket: S3_BUCKET_NAME,
-      Key: key
-    }));
-    console.log('Deleted S3 object:', key);
+      Key: key,
+    });
+    await s3Client.send(command);
+    console.log('Successfully deleted S3 object:', key);
     return true;
   } catch (e) {
-    console.error('Error deleting S3 object:', e);
+    console.error(`Error deleting S3 object '${key}':`, e);
     return false;
   }
 }
 
-//  POST /report
 app.post('/report', async (req, res) => {
   try {
-    let { latitude, longitude, town, county, country, priority, email } = req.body;
-    if (
-      typeof latitude !== 'number' ||
-      typeof longitude !== 'number' ||
-      !['low','medium','high'].includes(priority) ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-    ) {
-      return res.status(400).json({ error: 'Invalid input' });
+    let { latitude, longitude, town, county, country, priority, email, imageUrl } = req.body;
+
+    if (typeof latitude !== 'number' || typeof longitude !== 'number' ||
+        !['low', 'medium', 'high'].includes(priority) || typeof email !== 'string' ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Invalid input data provided.' });
     }
 
-    // fallback geocode if needed
-    const needLookup = !town || town.includes('Error') || !county || !country;
-    if (needLookup) {
-      const loc = await getAddressFromCoordsServer(latitude, longitude);
-      town   = loc.town   || town;
-      county = loc.county || county;
-      country= loc.country|| country;
+    const needGeocode = !town || town.includes('Error') || !county || county.includes('Error') || !country || country.includes('Error');
+    if (needGeocode) {
+      console.log(`Performing server-side geocode for ${latitude}, ${longitude}`);
+      const addr = await getAddressFromCoordsServer(latitude, longitude);
+      town = town && !town.includes('Error') ? town : addr.town;
+      county = county && !county.includes('Error') ? county : addr.county;
+      country = country && !country.includes('Error') ? country : addr.country;
     }
 
-    const newRep = await Report.create({
-      latitude, longitude, priority,
-      town:   town   || 'Unknown',
+    let analysisResult = 'Analysis Pending';
+    if (imageUrl && typeof imageUrl === 'string') {
+        console.log(`Performing image analysis for: ${imageUrl}`);
+        analysisResult = await analyzeImageWithAzure(imageUrl);
+    } else {
+        imageUrl = null; // Ensure imageUrl is null if not provided or invalid
+    }
+
+    const newReport = new Report({
+      latitude,
+      longitude,
+      priority,
+      email: email.toLowerCase().trim(),
+      town: town || 'Unknown',
       county: county || 'Unknown',
-      country:country|| 'Unknown',
-      email: email.toLowerCase().trim()
+      country: country || 'Unknown',
+      imageUrl: imageUrl,
+      recognizedCategory: analysisResult,
+      reportedAt: new Date()
     });
-    res.status(201).json({ message: 'Report saved', report: newRep });
+
+    await newReport.save();
+    console.log('New report saved:', newReport._id);
+    res.status(201).json({ message: 'Report saved successfully', report: newReport });
+
   } catch (e) {
-    console.error('POST /report error:', e);
-    res.status(500).json({ error: 'Server error saving report' });
+    console.error('Error in POST /report:', e);
+    res.status(500).json({ error: 'Server error while saving the report.' });
   }
 });
 
-//  GET /reports
 app.get('/reports', async (req, res) => {
-  console.log('GET /reports with', req.query);
+  console.log('GET /reports request received with query:', req.query);
   try {
     const { email, page = 1, limit = 50, includeClean = 'false' } = req.query;
     const filter = {};
-    if (email) filter.email = email.toLowerCase();
-    if (includeClean !== 'true') filter.isClean = { $ne: true };
+    if (email) {
+      filter.email = String(email).toLowerCase();
+    }
+    if (String(includeClean).toLowerCase() !== 'true') {
+      filter.isClean = { $ne: true };
+    }
 
-    const pageNum  = Math.max(1, parseInt(page,  10) || 1);
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.min(1000, Math.max(1, parseInt(limit, 10) || 50));
+    const skip = (pageNum - 1) * limitNum;
 
-    const arr = await Report
-      .find(filter)
-      .sort({ reportedAt: -1 })
-      .skip((pageNum - 1) * limitNum)
-      .limit(limitNum);
+    console.log('Finding reports with filter:', filter, `Page: ${pageNum}, Limit: ${limitNum}, Skip: ${skip}`);
 
-    res.json(arr);
+    const reports = await Report.find(filter)
+                                .sort({ reportedAt: -1 })
+                                .skip(skip)
+                                .limit(limitNum);
+
+    console.log(`Found ${reports.length} reports.`);
+    res.status(200).json(reports);
+
   } catch (e) {
-    console.error('GET /reports error:', e);
-    res.status(500).json({ error: 'Server error fetching reports' });
+    console.error('Error in GET /reports:', e);
+    res.status(500).json({ error: 'Server error while fetching reports.' });
   }
 });
 
-//  PATCH /report/image/:id
 app.patch('/report/image/:id', async (req, res) => {
-  const id = req.params.id;
+  const { id } = req.params;
   const { imageUrl } = req.body;
-  if (!mongoose.Types.ObjectId.isValid(id) || typeof imageUrl !== 'string') {
-    return res.status(400).json({ error: 'Invalid ID or URL' });
-  }
-  try {
-    const rpt = await Report.findById(id);
-    if (!rpt) return res.status(404).json({ error: 'Not found' });
 
-    const analysis = await analyzeImageWithAzure(imageUrl);
-    const updated = await Report.findByIdAndUpdate(id, {
-      imageUrl, recognizedCategory: analysis
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: 'Invalid report ID format.' });
+  }
+  if (typeof imageUrl !== 'string' || !imageUrl.trim()) {
+    return res.status(400).json({ error: 'Invalid image URL provided.' });
+  }
+
+  try {
+    const report = await Report.findById(id);
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found.' });
+    }
+    if (report.imageUrl && report.imageUrl !== imageUrl) {
+        console.log(`Deleting old S3 image for report ${id}: ${report.imageUrl}`);
+        await deleteS3Object(report.imageUrl);
+    }
+
+    console.log(`Analyzing new image for report ${id}: ${imageUrl}`);
+    const analysisResult = await analyzeImageWithAzure(imageUrl);
+
+    const updatedReport = await Report.findByIdAndUpdate(id, {
+      imageUrl: imageUrl,
+      recognizedCategory: analysisResult
     }, { new: true });
 
-    res.json({ message: 'Image saved', report: updated });
+    console.log(`Image updated for report ${id}.`);
+    res.status(200).json({ message: 'Report image updated successfully', report: updatedReport });
+
   } catch (e) {
-    console.error('PATCH /report/image error:', e);
-    res.status(500).json({ error: 'Server error updating image' });
+    console.error(`Error in PATCH /report/image/${id}:`, e);
+    res.status(500).json({ error: 'Server error while updating report image.' });
   }
 });
 
-//  PATCH /report/clean
 app.patch('/report/clean', async (req, res) => {
   const { reportId } = req.body;
   if (!mongoose.Types.ObjectId.isValid(reportId)) {
-    return res.status(400).json({ error: 'Invalid reportId' });
+    return res.status(400).json({ error: 'Invalid report ID format.' });
   }
+
   try {
-    const rep = await Report.findById(reportId);
-    if (!rep) return res.status(404).json({ error: 'Not found' });
-    if (rep.imageUrl) {
-      await deleteS3Object(rep.imageUrl);
+    const report = await Report.findById(reportId);
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found.' });
     }
-    const upd = await Report.findByIdAndUpdate(reportId, {
-      isClean: true, imageUrl: null, recognizedCategory: 'Cleaned'
+    if (report.isClean) {
+        return res.status(200).json({ message: 'Report already marked as clean.', report: report });
+    }
+    if (report.imageUrl) {
+      console.log(`Deleting S3 image for cleaned report ${reportId}: ${report.imageUrl}`);
+      await deleteS3Object(report.imageUrl);
+    }
+
+    const updatedReport = await Report.findByIdAndUpdate(reportId, {
+      isClean: true,
+      imageUrl: null,
+      recognizedCategory: 'Cleaned'
     }, { new: true });
-    res.json({ message: 'Marked clean', report: upd });
+
+    console.log(`Report ${reportId} marked as clean.`);
+    res.status(200).json({ message: 'Report marked as clean successfully', report: updatedReport });
+
   } catch (e) {
-    console.error('PATCH /report/clean error:', e);
-    res.status(500).json({ error: 'Server error marking clean' });
+    console.error(`Error in PATCH /report/clean for ID ${reportId}:`, e);
+    res.status(500).json({ error: 'Server error while marking report as clean.' });
   }
 });
 
-//  DELETE /report/:id
 app.delete('/report/:id', async (req, res) => {
-  const id = req.params.id;
+  const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
-    return res.status(400).json({ error: 'Invalid ID' });
+    return res.status(400).json({ error: 'Invalid report ID format.' });
   }
-  try {
-    const rep = await Report.findById(id);
-    if (!rep) return res.status(404).json({ error: 'Not found' });
-    if (rep.imageUrl) await deleteS3Object(rep.imageUrl);
-    await Report.findByIdAndDelete(id);
-    res.json({ message: 'Deleted', report: rep });
-  } catch (e) {
-    console.error('DELETE /report/:id error:', e);
-    res.status(500).json({ error: 'Server error deleting report' });
-  }
-});
 
-//  DELETE /report/image/:id
-app.delete('/report/image/:id', async (req, res) => {
-  const id = req.params.id;
-  if (!mongoose.Types.ObjectId.isValid(id)) {
-    return res.status(400).json({ error: 'Invalid ID' });
-  }
   try {
-    const rpt = await Report.findById(id);
-    if (!rpt) return res.status(404).json({ error: 'Not found' });
-    if (!rpt.imageUrl) {
-      return res.status(400).json({ error: 'No image to delete' });
+    const report = await Report.findById(id);
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found.' });
     }
-    await deleteS3Object(rpt.imageUrl);
-    const upd = await Report.findByIdAndUpdate(id, {
-      imageUrl: null, recognizedCategory: 'Analysis Pending'
-    }, { new: true });
-    res.json({ message: 'Image removed', report: upd });
+
+    if (report.imageUrl) {
+      console.log(`Deleting S3 image for deleted report ${id}: ${report.imageUrl}`);
+      await deleteS3Object(report.imageUrl);
+    }
+
+    await Report.findByIdAndDelete(id);
+    console.log(`Report ${id} deleted successfully.`);
+    res.status(200).json({ message: 'Report deleted successfully', reportId: id });
+
   } catch (e) {
-    console.error('DELETE /report/image/:id error:', e);
-    res.status(500).json({ error: 'Server error deleting image' });
+    console.error(`Error in DELETE /report/${id}:`, e);
+    res.status(500).json({ error: 'Server error while deleting the report.' });
   }
 });
 
-//  root health check
-app.get('/', (req, res) => {
-  res.send('LitterWarden Server is running!');
+app.delete('/report/image/:id', async (req, res) => {
+  const { id } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: 'Invalid report ID format.' });
+  }
+
+  try {
+    const report = await Report.findById(id);
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found.' });
+    }
+    if (!report.imageUrl) {
+      return res.status(400).json({ error: 'Report does not have an image to delete.' });
+    }
+
+    console.log(`Deleting S3 image explicitly for report ${id}: ${report.imageUrl}`);
+    await deleteS3Object(report.imageUrl);
+
+    const updatedReport = await Report.findByIdAndUpdate(id, {
+      imageUrl: null,
+      recognizedCategory: 'Analysis Pending'
+    }, { new: true });
+
+    console.log(`Image removed for report ${id}.`);
+    res.status(200).json({ message: 'Report image removed successfully', report: updatedReport });
+
+  } catch (e) {
+    console.error(`Error in DELETE /report/image/${id}:`, e);
+    res.status(500).json({ error: 'Server error while removing report image.' });
+  }
 });
 
-//  404 fallback
-app.use((req, res) => {
-  console.warn(`No route for [${req.method}] ${req.originalUrl}`);
+app.get('/leaderboard', async (req, res) => {
+  console.log('GET /leaderboard request received');
+  try {
+    const leaderboard = await Report.aggregate([
+      {
+        $match: { isClean: { $ne: true } }
+      },
+      {
+        $group: {
+          _id: "$email",
+          totalReports: { $sum: 1 },
+          highPriority: {
+            $sum: { $cond: [{ $eq: ["$priority", "high"] }, 1, 0] }
+          },
+          mediumPriority: {
+            $sum: { $cond: [{ $eq: ["$priority", "medium"] }, 1, 0] }
+          },
+          lowPriority: {
+            $sum: { $cond: [{ $eq: ["$priority", "low"] }, 1, 0] }
+          }
+        }
+      },
+      {
+        $sort: { totalReports: -1 }
+      },
+      {
+        $limit: 100
+      },
+      {
+        $project: {
+          _id: 0,
+          email: "$_id",
+          totalReports: 1,
+          highPriority: 1,
+          mediumPriority: 1,
+          lowPriority: 1
+        }
+      }
+    ]);
+
+    console.log(`Leaderboard generated with ${leaderboard.length} entries.`);
+    res.status(200).json(leaderboard);
+
+  } catch (e) {
+    console.error('Error in GET /leaderboard:', e);
+    res.status(500).json({ error: 'Server error while generating the leaderboard.' });
+  }
+});
+
+app.get('/', (req, res) => {
+  res.status(200).send('LitterWarden Server is running!');
+});
+
+app.use((req, res, next) => {
+  console.warn(`404 Not Found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({ error: 'Route not found' });
 });
 
-//  start
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on http://localhost:${PORT}`);
 });
