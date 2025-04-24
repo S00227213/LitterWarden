@@ -1,7 +1,7 @@
 
 const express = require('express');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
-const { getSignedUrl }          = require('@aws-sdk/s3-request-presigner');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 require('dotenv').config();
 
 const router = express.Router();
@@ -20,6 +20,7 @@ router.get('/presign', async (req, res) => {
     return res.status(400).json({ error: 'Missing filename or type' });
   }
   if (!process.env.S3_BUCKET_NAME) {
+    console.error("S3_BUCKET_NAME is not defined");
     return res.status(500).json({ error: 'Bucket name missing' });
   }
 
@@ -27,7 +28,8 @@ router.get('/presign', async (req, res) => {
     const cmd = new PutObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME,
       Key: `profile-photos/${filename}`,
-      ContentType: type
+      ContentType: type,
+      ACL: 'public-read'         
     });
     const url = await getSignedUrl(s3, cmd, { expiresIn: 60 });
     res.json({ url });
