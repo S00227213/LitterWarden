@@ -18,26 +18,19 @@ import LeaderboardScreen from './screens/LeaderboardScreen';
 const Stack = createNativeStackNavigator();
 
 function App() {
-
-  // --- Add this useEffect hook for Foreground FCM Messages ---
   useEffect(() => {
     const unsubscribe = messaging().onMessage(async remoteMessage => {
       console.log('Foreground FCM Message Received:', JSON.stringify(remoteMessage));
-
-      // Check if the message payload indicates our specific event
       if (remoteMessage.data && remoteMessage.data.type === 'REPORT_CLEANED') {
-        // Optional: Check if the notification is for the *current* user.
-        // This is mostly a safety check if backend targeting isn't perfect,
-        // but ideally, the backend only sends to the correct user's token.
         const currentUser = auth.currentUser;
-        if (currentUser) { // Only show if a user is logged in
+        if (currentUser) { 
           console.log('Showing "Report Cleaned" toast notification.');
           Toast.show({
-            type: 'success', // Or 'info'
+            type: 'success', 
             text1: 'Report Cleaned!',
             text2: `Your report near ${remoteMessage.data.reportTown || 'location'} was marked clean.`,
-            visibilityTime: 4000, // Duration in ms
-            position: 'top', // Or 'bottom'
+            visibilityTime: 4000, 
+            position: 'top', 
           });
         } else {
             console.log("Received clean notification, but no user logged in locally.");
@@ -45,8 +38,6 @@ function App() {
       }
 
     });
-
-
     return unsubscribe; 
   }, []); 
 
