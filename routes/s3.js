@@ -32,7 +32,7 @@ router.get('/presign', async (req, res) => {
   try {
     const command = new PutObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME,
-      Key: filename,
+      Key: `profile-photos/${filename}`,
       ContentType: type,
     });
 
