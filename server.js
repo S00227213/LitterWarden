@@ -5,6 +5,7 @@ const cors = require('cors');
 const fetch = require('node-fetch');
 const { URL } = require('url');
 const { S3Client, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const admin = require('firebase-admin'); // Import Firebase Admin
 const s3Routes = require('./routes/s3');
 
 const app = express();
@@ -21,8 +22,26 @@ const {
   AWS_REGION,
   AWS_ACCESS_KEY_ID,
   AWS_SECRET_ACCESS_KEY,
+  FIREBASE_SERVICE_ACCOUNT_KEY_PATH, // Env var for Firebase Admin key
   PORT = 10000
 } = process.env;
+
+// --- Firebase Admin Initialization ---
+if (!admin.apps.length && FIREBASE_SERVICE_ACCOUNT_KEY_PATH) {
+  try {
+    const serviceAccount = require(FIREBASE_SERVICE_ACCOUNT_KEY_PATH);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    console.log('Firebase Admin SDK Initialized Successfully.');
+  } catch (error) {
+    console.error("Error initializing Firebase Admin SDK:", error);
+    console.error("Push notifications will NOT be sent.");
+  }
+} else if (!FIREBASE_SERVICE_ACCOUNT_KEY_PATH) {
+    console.warn("Warning: FIREBASE_SERVICE_ACCOUNT_KEY_PATH not set. Push notifications disabled.");
+}
+
 
 if (!MONGO_URI) {
   console.error("FATAL ERROR: MONGO_URI environment variable is not set.");
@@ -34,6 +53,7 @@ if (!S3_BUCKET_NAME) console.warn("Warning: S3_BUCKET_NAME is not set. S3 operat
 if (!AWS_REGION) console.warn("Warning: AWS_REGION is not set.");
 if (!AWS_ACCESS_KEY_ID) console.warn("Warning: AWS_ACCESS_KEY_ID is not set.");
 if (!AWS_SECRET_ACCESS_KEY) console.warn("Warning: AWS_SECRET_ACCESS_KEY is not set.");
+
 
 let s3Client;
 if (AWS_REGION && AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY && S3_BUCKET_NAME) {
@@ -76,6 +96,15 @@ const reportSchema = new mongoose.Schema({
   isClean:          { type: Boolean, default: false, index: true },
 });
 const Report = mongoose.model('Report', reportSchema, 'reports');
+
+// --- ADD User Schema for storing FCM Tokens ---
+const userSchema = new mongoose.Schema({
+  email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
+  // Add other user fields if needed (e.g., password hash if managing users here)
+  fcmTokens: [{ type: String }] // Array to store FCM device tokens
+});
+const User = mongoose.model('User', userSchema); // Use 'User' model name
+
 
 async function getAddressFromCoordsServer(latitude, longitude) {
   if (!GOOGLE_MAPS_API_KEY) {
@@ -197,6 +226,35 @@ async function deleteS3Object(imageUrl) {
   }
 }
 
+// --- ADD Endpoint to receive FCM tokens ---
+app.post('/users/fcm-token', async (req, res) => {
+  const { email, token } = req.body;
+  if (!email || !token) {
+    return res.status(400).json({ error: 'Missing email or token' });
+  }
+  try {
+    const updatedUser = await User.findOneAndUpdate(
+      { email: email.toLowerCase() },
+      { $addToSet: { fcmTokens: token } },
+      // { new: true, upsert: true } // Use upsert: true if you want to create user if not found
+      { new: true, upsert: false } // Assuming users are created via registration/login
+    );
+
+    if (!updatedUser) {
+        // This might happen if the user record doesn't exist yet or uses a different ID system
+        console.warn(`User not found to update FCM token: ${email}. Ensure user exists.`);
+        return res.status(404).json({ error: 'User not found' });
+    }
+
+    console.log(`Stored/Updated FCM token for ${email}`);
+    res.status(200).json({ message: 'Token stored successfully' });
+  } catch (error) {
+    console.error(`Error storing FCM token for ${email}:`, error);
+    res.status(500).json({ error: 'Server error storing token' });
+  }
+});
+
+
 app.post('/report', async (req, res) => {
   try {
     let { latitude, longitude, town, county, country, priority, email, imageUrl } = req.body;
@@ -221,7 +279,7 @@ app.post('/report', async (req, res) => {
         console.log(`Performing image analysis for: ${imageUrl}`);
         analysisResult = await analyzeImageWithAzure(imageUrl);
     } else {
-        imageUrl = null; // Ensure imageUrl is null if not provided or invalid
+        imageUrl = null;
     }
 
     const newReport = new Report({
@@ -250,7 +308,7 @@ app.post('/report', async (req, res) => {
 app.get('/reports', async (req, res) => {
   console.log('GET /reports request received with query:', req.query);
   try {
-    const { email, page = 1, limit = 50, includeClean = 'false' } = req.query;
+    const { email, page = 1, limit = 1000, includeClean = 'false' } = req.query; // Increase default limit for cleaner maybe
     const filter = {};
     if (email) {
       filter.email = String(email).toLowerCase();
@@ -260,13 +318,13 @@ app.get('/reports', async (req, res) => {
     }
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const limitNum = Math.min(1000, Math.max(1, parseInt(limit, 10) || 50));
+    const limitNum = Math.min(5000, Math.max(1, parseInt(limit, 10) || 1000)); // Allow larger limit
     const skip = (pageNum - 1) * limitNum;
 
     console.log('Finding reports with filter:', filter, `Page: ${pageNum}, Limit: ${limitNum}, Skip: ${skip}`);
 
     const reports = await Report.find(filter)
-                                .sort({ reportedAt: -1 })
+                                .sort({ reportedAt: -1 }) // Default sort
                                 .skip(skip)
                                 .limit(limitNum);
 
@@ -317,6 +375,7 @@ app.patch('/report/image/:id', async (req, res) => {
   }
 });
 
+// --- MODIFIED /report/clean endpoint ---
 app.patch('/report/clean', async (req, res) => {
   const { reportId } = req.body;
   if (!mongoose.Types.ObjectId.isValid(reportId)) {
@@ -324,16 +383,19 @@ app.patch('/report/clean', async (req, res) => {
   }
 
   try {
-    const report = await Report.findById(reportId);
-    if (!report) {
+    const reportToClean = await Report.findById(reportId);
+    if (!reportToClean) {
       return res.status(404).json({ error: 'Report not found.' });
     }
-    if (report.isClean) {
-        return res.status(200).json({ message: 'Report already marked as clean.', report: report });
+    if (reportToClean.isClean) {
+        return res.status(200).json({ message: 'Report already marked as clean.', report: reportToClean });
     }
-    if (report.imageUrl) {
-      console.log(`Deleting S3 image for cleaned report ${reportId}: ${report.imageUrl}`);
-      await deleteS3Object(report.imageUrl);
+
+    const reporterEmail = reportToClean.email; // Get email before update
+
+    if (reportToClean.imageUrl) {
+      console.log(`Deleting S3 image for cleaned report ${reportId}: ${reportToClean.imageUrl}`);
+      await deleteS3Object(reportToClean.imageUrl);
     }
 
     const updatedReport = await Report.findByIdAndUpdate(reportId, {
@@ -343,6 +405,53 @@ app.patch('/report/clean', async (req, res) => {
     }, { new: true });
 
     console.log(`Report ${reportId} marked as clean.`);
+
+    // --- Send FCM Notification ---
+    if (reporterEmail && admin.apps.length > 0) { // Check if admin SDK is ready
+        try {
+            const reportingUser = await User.findOne({ email: reporterEmail.toLowerCase() });
+            if (reportingUser && reportingUser.fcmTokens && reportingUser.fcmTokens.length > 0) {
+                const tokens = reportingUser.fcmTokens;
+                const messagePayload = {
+                    data: { // Use data payload for foreground handling
+                        type: 'REPORT_CLEANED',
+                        reportId: reportId.toString(),
+                        reportTown: reportToClean.town || 'your reported location',
+                    },
+                    // Optional notification payload for OS handling
+                    // notification: {
+                    //   title: 'Report Cleaned!',
+                    //   body: `Your report near ${reportToClean.town || 'location'} was cleaned.`
+                    // }
+                };
+
+                console.log(`Sending REPORT_CLEANED notification to ${reporterEmail}`);
+                const response = await admin.messaging().sendToDevice(tokens, messagePayload, { priority: "high" });
+                console.log('FCM send response received.'); // Don't log full response unless debugging tokens
+
+                // Optional: Handle token cleanup based on response
+                const tokensToRemove = [];
+                response.results.forEach((result, index) => {
+                    if (result.error) {
+                        console.error('FCM send failure:', result.error.code, 'for token index:', index);
+                        if (['messaging/invalid-registration-token', 'messaging/registration-token-not-registered'].includes(result.error.code)) {
+                            tokensToRemove.push(tokens[index]);
+                        }
+                    }
+                });
+                if (tokensToRemove.length > 0) {
+                    console.log("Attempting to remove invalid FCM tokens:", tokensToRemove.length);
+                    await User.updateOne( { _id: reportingUser._id }, { $pullAll: { fcmTokens: tokensToRemove } } );
+                }
+            } else {
+                console.warn(`Could not find user or FCM tokens for ${reporterEmail} to send clean notification.`);
+            }
+        } catch (fcmError) {
+            console.error(`Failed to send FCM notification for report ${reportId}:`, fcmError);
+        }
+    }
+    // --- End FCM Notification ---
+
     res.status(200).json({ message: 'Report marked as clean successfully', report: updatedReport });
 
   } catch (e) {
@@ -350,6 +459,7 @@ app.patch('/report/clean', async (req, res) => {
     res.status(500).json({ error: 'Server error while marking report as clean.' });
   }
 });
+
 
 app.delete('/report/:id', async (req, res) => {
   const { id } = req.params;
@@ -414,38 +524,21 @@ app.get('/leaderboard', async (req, res) => {
   console.log('GET /leaderboard request received');
   try {
     const leaderboard = await Report.aggregate([
-      {
-        $match: { isClean: { $ne: true } }
-      },
+      { $match: { isClean: { $ne: true } } },
       {
         $group: {
           _id: "$email",
           totalReports: { $sum: 1 },
-          highPriority: {
-            $sum: { $cond: [{ $eq: ["$priority", "high"] }, 1, 0] }
-          },
-          mediumPriority: {
-            $sum: { $cond: [{ $eq: ["$priority", "medium"] }, 1, 0] }
-          },
-          lowPriority: {
-            $sum: { $cond: [{ $eq: ["$priority", "low"] }, 1, 0] }
-          }
+          highPriority: { $sum: { $cond: [{ $eq: ["$priority", "high"] }, 1, 0] } },
+          mediumPriority: { $sum: { $cond: [{ $eq: ["$priority", "medium"] }, 1, 0] } },
+          lowPriority: { $sum: { $cond: [{ $eq: ["$priority", "low"] }, 1, 0] } }
         }
       },
-      {
-        $sort: { totalReports: -1 }
-      },
-      {
-        $limit: 100
-      },
+      { $sort: { totalReports: -1 } },
+      { $limit: 100 },
       {
         $project: {
-          _id: 0,
-          email: "$_id",
-          totalReports: 1,
-          highPriority: 1,
-          mediumPriority: 1,
-          lowPriority: 1
+          _id: 0, email: "$_id", totalReports: 1, highPriority: 1, mediumPriority: 1, lowPriority: 1
         }
       }
     ]);

@@ -1,23 +1,24 @@
+// LeaderboardScreenStyles.js
+
 import { StyleSheet } from 'react-native';
 
-const styles = StyleSheet.create({
+export default StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#121212', // Dark background for the whole screen area
+    backgroundColor: '#121212',
   },
   container: {
     flex: 1,
     paddingHorizontal: 10,
-    paddingTop: 10, // Adjust as needed if using a custom header
-    backgroundColor: '#121212', // Dark theme background
+    paddingTop: 10,
+    backgroundColor: '#121212',
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#FFFFFF', // White text
+    color: '#FFFFFF',
     textAlign: 'center',
-    marginBottom: 20,
-    marginTop: 10,
+    marginVertical: 10,
   },
   loader: {
     flex: 1,
@@ -28,7 +29,7 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
     marginTop: 50,
-    color: '#FF6B6B', // Reddish color for errors
+    color: '#FF6B6B',
     fontSize: 16,
     paddingHorizontal: 20,
   },
@@ -36,82 +37,90 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
     marginTop: 50,
-    color: '#AAAAAA', // Greyish text for empty state
+    color: '#AAAAAA',
     fontSize: 16,
   },
   listContentContainer: {
-    paddingBottom: 20, // Add padding at the bottom of the list
+    paddingBottom: 20,
   },
-  // Header Row Styles
+
   headerRow: {
     flexDirection: 'row',
     paddingVertical: 12,
     borderBottomWidth: 2,
-    borderBottomColor: '#03DAC6', // Accent color border
-    backgroundColor: '#1E1E1E', // Slightly lighter background for header
+    borderBottomColor: '#03DAC6',
+    backgroundColor: '#1E1E1E',
     marginBottom: 5,
-    paddingHorizontal: 5, // Padding inside the header row
+    paddingHorizontal: 5,
   },
   headerText: {
-    color: '#E0E0E0', // Lighter grey text for headers
+    color: '#E0E0E0',
     fontWeight: 'bold',
     fontSize: 14,
     textAlign: 'center',
   },
   rankHeader: {
-    flex: 0.1, // ~10% width for rank
+    flex: 0.1,
     textAlign: 'left',
   },
   userHeader: {
-    flex: 0.4, // ~40% width for user email
+    flex: 0.4,
     textAlign: 'left',
     paddingLeft: 5,
   },
   countHeader: {
-    flex: 0.125, // ~12.5% width for each count (Total, H, M, L)
+    flex: 0.125,
   },
-  // Item Row Styles
+
   itemRow: {
     flexDirection: 'row',
-    alignItems: 'center', // Vertically center items in the row
+    alignItems: 'center',
     paddingVertical: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#333333', // Darker separator line
-    paddingHorizontal: 5, // Padding inside item rows
+    borderBottomColor: '#333333',
+    paddingHorizontal: 5,
   },
   itemText: {
-    color: '#FFFFFF', // White text for items
+    color: '#FFFFFF',
     fontSize: 14,
     textAlign: 'center',
   },
+  rankContainer: {
+    flex: 0.1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   rank: {
-    flex: 0.1, // Match header width
     textAlign: 'left',
     fontWeight: 'bold',
-    color: '#BB86FC', // Purple accent for rank
+    color: '#BB86FC',
   },
   user: {
-    flex: 0.4, // Match header width
+    flex: 0.4,
     textAlign: 'left',
     paddingLeft: 5,
-    color: '#E0E0E0', // Lighter grey for email
+    color: '#E0E0E0',
   },
   count: {
-    flex: 0.125, // Match header width
+    flex: 0.125,
   },
-  // Priority Colors (reusing styles from Dashboard potentially)
+
+  crown: {
+    width: 16,
+    height: 16,
+    marginRight: 4,
+  },
+
   priorityHigh: {
-    color: '#FF7043', // Example: Orange/Red for High
+    color: '#FF7043',
     fontWeight: 'bold',
   },
   priorityMedium: {
-    color: '#FFCA28', // Example: Amber/Yellow for Medium
+    color: '#FFCA28',
     fontWeight: 'bold',
   },
   priorityLow: {
-    color: '#66BB6A', // Example: Green for Low
+    color: '#66BB6A',
     fontWeight: 'bold',
   },
 });
-
-export default styles;
