@@ -27,9 +27,9 @@ router.get('/presign', async (req, res) => {
   try {
     const cmd = new PutObjectCommand({
       Bucket: process.env.S3_BUCKET_NAME,
-      Key: `profile-photos/${filename}`,
+      Key: `profile-photos/${filename}`,   
       ContentType: type,
-      ACL: 'public-read'         
+      ACL: 'public-read'               
     });
     const url = await getSignedUrl(s3, cmd, { expiresIn: 60 });
     res.json({ url });
