@@ -59,7 +59,7 @@ const Dashboard = ({ navigation }) => {
       if (user) {
         setUserEmail(user.email);
         if (user.photoURL) {
-          setProfilePhotoUri(`${user.photoURL}?t=${Date.now()}`); // bust cache
+          setProfilePhotoUri(`${user.photoURL}?t=${Date.now()}`); 
         }
       } else {
         navigation.replace('Login');
@@ -183,8 +183,6 @@ const Dashboard = ({ navigation }) => {
       const ext = asset.fileName?.split('.').pop() || 'jpg';
       const safeEmail = userEmail.replace(/[@.]/g, '_');
       const filename = `${safeEmail}_${Date.now()}.${ext}`;
-
-      // a) Get presigned URL
       const presignRes = await fetch(
         `${SERVER_URL}/s3/presign?filename=${encodeURIComponent(filename)}&type=${encodeURIComponent(
           asset.type
@@ -193,7 +191,6 @@ const Dashboard = ({ navigation }) => {
       if (!presignRes.ok) throw new Error(`Presign failed ${presignRes.status}`);
       const { url: presignedUrl } = await presignRes.json();
 
-      // b) Upload blob
       const blob = await uriToBlob(asset.uri);
       const uploadRes = await fetch(presignedUrl, {
         method: 'PUT',
@@ -204,12 +201,9 @@ const Dashboard = ({ navigation }) => {
         body: blob,
       });
       if (!uploadRes.ok) throw new Error(`Upload failed ${uploadRes.status}`);
-
-      // c) Update Firebase profile
       const publicUrl = `https://${S3_BUCKET_NAME}.s3.eu-west-1.amazonaws.com/${filename}`;
       await updateProfile(auth.currentUser, { photoURL: publicUrl });
 
-      // d) Show instantly
       setProfilePhotoUri(`${publicUrl}?t=${Date.now()}`);
       setShowProfileModal(false);
     } catch (err) {
@@ -218,8 +212,6 @@ const Dashboard = ({ navigation }) => {
       setUploading(false);
     }
   };
-
-  // 6) Open native maps
   const openInGoogleMaps = (lat, lon) => {
     const label = 'Litter Report';
     const url =
@@ -266,8 +258,8 @@ const Dashboard = ({ navigation }) => {
               </Text>
             ) : (
               <Text style={styles.row}>
+               <Text style={[styles.label, styles.priorityClean]}>Status: </Text>
                 <Text style={[styles.label, styles.priorityClean]}>Status: </Text>
-                <Text style={[styles.value, styles.priorityClean]}>Cleaned</Text>
               </Text>
             )}
             <Text style={styles.row}>
@@ -374,8 +366,6 @@ const Dashboard = ({ navigation }) => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1E1E1E" />
-
-      {/* Navbar with Back Arrow */}
       <View style={styles.navbar}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
@@ -485,6 +475,7 @@ const Dashboard = ({ navigation }) => {
 
       {/* Bottom Buttons */}
       <View style={styles.bottomButtonContainer}>
+        {/* Leaderboard */}
         <TouchableOpacity
           style={[styles.reportButton, styles.leaderboardButton]}
           onPress={() => navigation.navigate('Leaderboard')}
@@ -494,15 +485,7 @@ const Dashboard = ({ navigation }) => {
           </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.reportButton, { backgroundColor: '#03DAC6' }]}
-          onPress={() => navigation.navigate('CleanerTasks')}
-        >
-          <Text style={[styles.reportButtonText, { color: '#121212' }]}>
-            View Cleanup Tasks
-          </Text>
-        </TouchableOpacity>
-
+        {/* Report Litter Now */}
         <TouchableOpacity
           style={styles.reportButton}
           onPress={() => navigation.navigate('Map')}
