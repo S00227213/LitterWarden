@@ -4,97 +4,69 @@ import {
   Text,
   FlatList,
   ActivityIndicator,
-  StyleSheet,
   StatusBar,
   SafeAreaView,
   RefreshControl,
+  Image,
+  TouchableOpacity,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
-import { REACT_APP_SERVER_URL } from '@env'; // Make sure you have this in your .env
-import styles from './LeaderboardScreenStyles'; // We'll create this next
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { REACT_APP_SERVER_URL } from '@env';
+import styles from './LeaderboardScreenStyles';
 
-const LeaderboardScreen = ({ navigation }) => {
+// Crown icon for the top spot
+const crownIcon = require('../assets/crown.png');
+
+const LeaderboardScreen = () => {
+  const navigation = useNavigation();
   const SERVER_URL = REACT_APP_SERVER_URL;
-  const [leaderboardData, setLeaderboardData] = useState([]);
+  const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
 
-  // Function to fetch leaderboard data from the backend
+  // Fetch leaderboard from backend
   const fetchLeaderboard = useCallback(async () => {
     if (!SERVER_URL) {
-      setError('Server URL is not configured. Please check environment variables.');
+      setError('Server URL not configured.');
       setLoading(false);
       setRefreshing(false);
       return;
     }
-
-    // Don't set loading to true if just refreshing
-    if (!refreshing) {
-        setLoading(true);
-    }
-    setError(null); // Clear previous errors
+    if (!refreshing) setLoading(true);
+    setError(null);
 
     try {
-      // --- IMPORTANT ---
-      // This assumes your backend has an endpoint like '/leaderboard'
-      // that returns an array of user objects, sorted by total reports descending.
-      // Each object should look something like:
-      // {
-      //   _id: "user_identifier_or_email", // Unique key for the user
-      //   email: "user@example.com",       // Display identifier
-      //   totalReports: 15,
-      //   highPriority: 5,
-      //   mediumPriority: 7,
-      //   lowPriority: 3
-      // }
-      // --- IMPORTANT ---
-      const response = await fetch(`${SERVER_URL}/leaderboard`);
-
-      if (!response.ok) {
-        throw new Error(`Server responded with status ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      if (!Array.isArray(data)) {
-         console.error("Invalid data format received from /leaderboard:", data);
-         throw new Error('Received invalid data format from server.');
-      }
-
-      console.log("Fetched leaderboard data:", data.length, "users");
-      setLeaderboardData(data);
-
-    } catch (err) {
-      console.error('Error fetching leaderboard:', err);
-      setError(`Failed to load leaderboard: ${err.message}`);
-      setLeaderboardData([]); // Clear data on error
+      const resp = await fetch(`${SERVER_URL}/leaderboard`);
+      if (!resp.ok) throw new Error(`Status ${resp.status}`);
+      const json = await resp.json();
+      if (!Array.isArray(json)) throw new Error('Invalid response format');
+      setData(json);
+    } catch (e) {
+      setError(e.message);
+      setData([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [SERVER_URL, refreshing]); // Dependency on SERVER_URL and refreshing state
+  }, [SERVER_URL, refreshing]);
 
-  // Fetch data when the screen comes into focus
+  // Re-fetch when screen focused
   useFocusEffect(
     useCallback(() => {
       fetchLeaderboard();
-    }, [fetchLeaderboard]) // Re-run if fetchLeaderboard function changes (due to SERVER_URL)
+    }, [fetchLeaderboard])
   );
 
-  // Handler for pull-to-refresh
+  // Pull-to-refresh handler
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    // fetchLeaderboard will be called because 'refreshing' state changes,
-    // and fetchLeaderboard depends on it.
-    // No need to call fetchLeaderboard() directly here if setup correctly.
-    // However, explicitly calling it can be clearer:
     fetchLeaderboard();
-  }, [fetchLeaderboard]); // Dependency added
+  }, [fetchLeaderboard]);
 
-  // Render Header for the FlatList
-  const renderListHeader = () => (
-    <View style={styles.headerRow}>
+  // Header row
+  const renderHeader = () => (
+    <View style={[styles.headerRow, styles.headerCard]}>
       <Text style={[styles.headerText, styles.rankHeader]}>#</Text>
       <Text style={[styles.headerText, styles.userHeader]}>User</Text>
       <Text style={[styles.headerText, styles.countHeader]}>Total</Text>
@@ -104,58 +76,96 @@ const LeaderboardScreen = ({ navigation }) => {
     </View>
   );
 
-  // Render each item in the FlatList
-  const renderItem = ({ item, index }) => (
-    <View style={styles.itemRow}>
-      <Text style={[styles.itemText, styles.rank]}>{index + 1}</Text>
-      <Text style={[styles.itemText, styles.user]} numberOfLines={1} ellipsizeMode="tail">
-        {item.email || item._id || 'Unknown User'}
-      </Text>
-      <Text style={[styles.itemText, styles.count]}>{item.totalReports ?? 'N/A'}</Text>
-      <Text style={[styles.itemText, styles.count, styles.priorityHigh]}>{item.highPriority ?? 0}</Text>
-      <Text style={[styles.itemText, styles.count, styles.priorityMedium]}>{item.mediumPriority ?? 0}</Text>
-      <Text style={[styles.itemText, styles.count, styles.priorityLow]}>{item.lowPriority ?? 0}</Text>
-    </View>
-  );
-
-  // Render Content Area (Loading, Error, Empty, or List)
-  const renderContent = () => {
-    if (loading && !refreshing) {
-      return <ActivityIndicator size="large" color="#03DAC6" style={styles.loader} />;
-    }
-    if (error) {
-      return <Text style={styles.errorText}>{error}</Text>;
-    }
-    if (!leaderboardData || leaderboardData.length === 0) {
-      return <Text style={styles.emptyText}>No leaderboard data available yet.</Text>;
-    }
-
+  // Each row
+  const renderItem = ({ item, index }) => {
+    const isEven = index % 2 === 0;
+    const cardStyle = [
+      styles.card,
+      isEven ? styles.cardEven : styles.cardOdd,
+      index === 0 && styles.topCard,
+    ];
     return (
+      <View style={cardStyle}>
+        <View style={styles.cardContent}>
+          <View style={styles.rankContainer}>
+            {index === 0 ? (
+              <Image source={crownIcon} style={styles.crownIcon} />
+            ) : (
+              <Text
+                style={[
+                  styles.itemText,
+                  index === 1
+                    ? styles.rankSilver
+                    : index === 2
+                    ? styles.rankBronze
+                    : styles.rank
+                ]}
+              >
+                {index + 1}
+              </Text>
+            )}
+          </View>
+          <Text style={[styles.itemText, styles.user]} numberOfLines={1} ellipsizeMode="tail">
+            {item.email || item._id || '–'}
+          </Text>
+          <Text style={[styles.itemText, styles.count]}>
+            {item.totalReports ?? 0}
+          </Text>
+          <Text style={[styles.itemText, styles.count, styles.priorityHigh]}>
+            {item.highPriority ?? 0}
+          </Text>
+          <Text style={[styles.itemText, styles.count, styles.priorityMedium]}>
+            {item.mediumPriority ?? 0}
+          </Text>
+          <Text style={[styles.itemText, styles.count, styles.priorityLow]}>
+            {item.lowPriority ?? 0}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
+  // Decide what to render
+  let content;
+  if (loading && !refreshing) {
+    content = <ActivityIndicator style={styles.loader} size="large" color="#03DAC6" />;
+  } else if (error) {
+    content = <Text style={styles.errorText}>{error}</Text>;
+  } else if (data.length === 0) {
+    content = <Text style={styles.emptyText}>No data available.</Text>;
+  } else {
+    content = (
       <FlatList
-        data={leaderboardData}
+        data={data}
+        keyExtractor={(item) => item._id || Math.random().toString()}
         renderItem={renderItem}
-        keyExtractor={(item) => item._id || String(Math.random())} // Fallback key if _id missing
-        ListHeaderComponent={renderListHeader}
+        ListHeaderComponent={renderHeader}
         contentContainerStyle={styles.listContentContainer}
-        refreshControl={ // Add pull-to-refresh
+        refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={["#03DAC6"]} // Spinner color
-            tintColor={"#03DAC6"} // Spinner color for iOS
+            colors={['#03DAC6']}
           />
         }
       />
     );
-  };
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor="#121212" />
-      <View style={styles.container}>
-        <Text style={styles.title}>Top Reporters</Text>
-        {renderContent()}
+      <StatusBar barStyle="light-content" />
+      {/* Top bar with Back arrow + Title */}
+      <View style={styles.backHeader}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.backArrow}>←</Text>
+        </TouchableOpacity>
+        <Text style={styles.title}>Leaderboard</Text>
       </View>
+      {content}
     </SafeAreaView>
   );
 };

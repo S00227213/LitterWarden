@@ -12,7 +12,8 @@ const getCardWidth = () => {
 
 const cardWidth = getCardWidth();
 // *** EXPORT this flag so the component can use it ***
-export const isSingleColumn = cardWidth === Dimensions.get('window').width - (10 * 2);
+export const isSingleColumn =
+  cardWidth === Dimensions.get('window').width - (10 * 2);
 
 const styles = StyleSheet.create({
   container: {
@@ -37,16 +38,16 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   backButton: {
-      position: 'absolute',
-      left: 15,
-      top: Platform.OS === 'android' ? StatusBar.currentHeight : 15,
-      bottom: 0,
-      justifyContent: 'center',
-      paddingRight: 10,
+    position: 'absolute',
+    left: 15,
+    top: Platform.OS === 'android' ? StatusBar.currentHeight : 15,
+    bottom: 0,
+    justifyContent: 'center',
+    paddingRight: 10,
   },
   backButtonText: {
-      color: '#BB86FC',
-      fontSize: 16,
+    color: '#BB86FC',
+    fontSize: 16,
   },
   filterBar: {
     flexDirection: 'row',
@@ -70,10 +71,10 @@ const styles = StyleSheet.create({
     borderColor: '#BB86FC',
     backgroundColor: 'rgba(187, 134, 252, 0.2)',
   },
-  filterButtonHigh: { borderColor: '#F44336', },
-  filterButtonMedium: { borderColor: '#FF9800', },
-  filterButtonLow: { borderColor: '#FFEB3B', },
-  filterButtonClean: { borderColor: '#4CAF50', },
+  filterButtonHigh: { borderColor: '#F44336' },
+  filterButtonMedium: { borderColor: '#FF9800' },
+  filterButtonLow: { borderColor: '#FFEB3B' },
+  filterButtonClean: { borderColor: '#4CAF50' },
   filterButtonText: {
     color: '#A0A0A0',
     fontSize: 12,
@@ -94,10 +95,10 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   errorContainer: {
-      flex: 1,
-      justifyContent: 'center',
-      alignItems: 'center',
-      padding: 20,
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
   },
   errorText: {
     fontSize: 16,
@@ -106,15 +107,15 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   retryButton: {
-      backgroundColor: '#BB86FC',
-      paddingVertical: 10,
-      paddingHorizontal: 20,
-      borderRadius: 20,
+    backgroundColor: '#BB86FC',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 20,
   },
   retryButtonText: {
-      color: '#121212',
-      fontSize: 16,
-      fontWeight: 'bold',
+    color: '#121212',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   noReportsText: {
     flex: 1,
@@ -206,16 +207,21 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   noMapContainer: {
-     borderWidth: 1,
-     borderColor: '#444',
+    borderWidth: 1,
+    borderColor: '#444',
   },
   miniMap: {
     ...StyleSheet.absoluteFillObject,
   },
+  profileButton: {
+    position: 'absolute',
+    right: 15,
+    top: Platform.OS === 'android' ? StatusBar.currentHeight : 15,
+  },
   noMapText: {
-     fontSize: 10,
-     color: '#999',
-     textAlign: 'center',
+    fontSize: 10,
+    color: '#999',
+    textAlign: 'center',
   },
   mapLoadingOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -227,7 +233,7 @@ const styles = StyleSheet.create({
   priorityLow: { color: '#FFEB3B' },
   priorityMedium: { color: '#FF9800' },
   priorityHigh: { color: '#F44336' },
-  priorityClean: { color: '#4CAF50', },
+  priorityClean: { color: '#4CAF50' },
   pagination: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -280,7 +286,7 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     overflow: 'hidden',
   },
-   modalScrollView: {
+  modalScrollView: {
     paddingHorizontal: 15,
     paddingTop: 15,
     paddingBottom: 10,
@@ -382,21 +388,64 @@ const styles = StyleSheet.create({
     backgroundColor: '#4CAF50',
   },
   addPhotoButton: {
-     backgroundColor: '#03A9F4',
-     marginTop: 5,
-     flexGrow: 0,
+    backgroundColor: '#03A9F4',
+    marginTop: 5,
+    flexGrow: 0,
   },
   changePhotoButton: {
-     backgroundColor: '#FFC107',
-     marginTop: 5,
-     flexGrow: 0,
+    backgroundColor: '#FFC107',
+    marginTop: 5,
+    flexGrow: 0,
   },
   modalErrorText: {
-      color: '#FF7043',
-      textAlign: 'center',
-      marginBottom: 10,
-      fontSize: 14,
+    color: '#FF7043',
+    textAlign: 'center',
+    marginBottom: 10,
+    fontSize: 14,
+  },
+
+  /** Avatar & Profile Modal Styles **/
+  avatarContainer: {
+    marginRight: 15,
+  },
+  avatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  avatarPlaceholder: {
+    backgroundColor: '#444',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarPlaceholderText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modalHeader: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    textAlign: 'center',
+    marginBottom: 15,
+  },
+  profilePhotoLarge: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#444',
+    marginBottom: 12,
+  },
+  profileEmail: {
+    fontSize: 14,
+    color: '#E0E0E0',
+    marginBottom: 16,
+  },
+  logoutModalButton: {
+    backgroundColor: '#FF5252',
   },
 });
 
-export default styles; // Default export
+export default styles;

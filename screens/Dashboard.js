@@ -24,7 +24,7 @@ import {
 } from '@env';
 import styles from './DashboardScreenStyles';
 
-// Convert a file:// URI into a Blob
+// Utility: Convert file:// URI to Blob
 const uriToBlob = uri =>
   new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -35,9 +35,10 @@ const uriToBlob = uri =>
     xhr.send(null);
   });
 
+// Utility: Validate lat/lng
 const isValidLatLng = (lat, lon) => {
   const pLat = parseFloat(lat), pLon = parseFloat(lon);
-  return !isNaN(pLat) && !isNaN(pLon) && Math.abs(pLat)<=90 && Math.abs(pLon)<=180;
+  return !isNaN(pLat) && !isNaN(pLon) && Math.abs(pLat) <= 90 && Math.abs(pLon) <= 180;
 };
 
 const Dashboard = ({ navigation }) => {
@@ -58,8 +59,7 @@ const Dashboard = ({ navigation }) => {
       if (user) {
         setUserEmail(user.email);
         if (user.photoURL) {
-          // bust cache
-          setProfilePhotoUri(`${user.photoURL}?t=${Date.now()}`);
+          setProfilePhotoUri(`${user.photoURL}?t=${Date.now()}`); // bust cache
         }
       } else {
         navigation.replace('Login');
@@ -94,7 +94,7 @@ const Dashboard = ({ navigation }) => {
     }, [userEmail, fetchReports])
   );
 
-  // 3) Delete report
+  // 3) Delete a report
   const deleteReport = useCallback(
     reportId => {
       Alert.alert('Delete Report?', 'This cannot be undone.', [
@@ -113,42 +113,62 @@ const Dashboard = ({ navigation }) => {
             } finally {
               setLoading(false);
             }
-          }
-        }
+          },
+        },
       ]);
     },
     [SERVER_URL]
   );
 
-  // 4) Filter & sort
+  // 4) Filter & sort reports
   const filteredAndSorted = useMemo(() => {
-    const order = { high:3, medium:2, low:1 };
+    const priorityOrder = { high: 3, medium: 2, low: 1 };
     let list = [...reports];
+
     if (filterSelection === 'clean') {
       list = list.filter(r => r.isClean);
-    } else if (['high','medium','low'].includes(filterSelection)) {
+    } else if (['high', 'medium', 'low'].includes(filterSelection)) {
       list = list.filter(r => !r.isClean && r.priority === filterSelection);
     }
-    list.sort((a,b) => {
+
+    list.sort((a, b) => {
       if (!a.isClean && b.isClean) return -1;
       if (a.isClean && !b.isClean) return 1;
       if (!a.isClean && !b.isClean) {
-        return (order[b.priority]||0) - (order[a.priority]||0);
+        return (priorityOrder[b.priority] || 0) - (priorityOrder[a.priority] || 0);
       }
       return new Date(b.reportedAt) - new Date(a.reportedAt);
     });
+
     return list;
   }, [reports, filterSelection]);
 
-  const totalPages = Math.ceil(filteredAndSorted.length/itemsPerPage);
-  const pageItems  = filteredAndSorted.slice(currentPage*itemsPerPage,(currentPage+1)*itemsPerPage);
+  const totalPages = Math.ceil(filteredAndSorted.length / itemsPerPage);
+  const pageItems = filteredAndSorted.slice(
+    currentPage * itemsPerPage,
+    (currentPage + 1) * itemsPerPage
+  );
 
-  // 5) Photo upload
+  // 5) Profile photo upload
   const pickOrTakePhoto = () => {
-    Alert.alert('Select Photo','Choose source',[
-      { text:'Camera', onPress:()=>launchCamera({mediaType:'photo',quality:0.7,maxWidth:512,maxHeight:512},handleImage) },
-      { text:'Library', onPress:()=>launchImageLibrary({mediaType:'photo',quality:0.7,maxWidth:512,maxHeight:512},handleImage) },
-      { text:'Cancel', style:'cancel' }
+    Alert.alert('Select Profile Photo', 'Choose image source:', [
+      {
+        text: 'Camera',
+        onPress: () =>
+          launchCamera(
+            { mediaType: 'photo', quality: 0.7, maxWidth: 512, maxHeight: 512 },
+            handleImage
+          ),
+      },
+      {
+        text: 'Library',
+        onPress: () =>
+          launchImageLibrary(
+            { mediaType: 'photo', quality: 0.7, maxWidth: 512, maxHeight: 512 },
+            handleImage
+          ),
+      },
+      { text: 'Cancel', style: 'cancel' },
     ]);
   };
 
@@ -160,34 +180,36 @@ const Dashboard = ({ navigation }) => {
 
     setUploading(true);
     try {
-      const ext       = asset.fileName?.split('.').pop()||'jpg';
-      const safeEmail = userEmail.replace(/[@.]/g,'_');
-      const filename  = `${safeEmail}_${Date.now()}.${ext}`;
+      const ext = asset.fileName?.split('.').pop() || 'jpg';
+      const safeEmail = userEmail.replace(/[@.]/g, '_');
+      const filename = `${safeEmail}_${Date.now()}.${ext}`;
 
-      // 5a) presign
+      // a) Get presigned URL
       const presignRes = await fetch(
-        `${SERVER_URL}/s3/presign?filename=${encodeURIComponent(filename)}&type=${encodeURIComponent(asset.type)}`
+        `${SERVER_URL}/s3/presign?filename=${encodeURIComponent(filename)}&type=${encodeURIComponent(
+          asset.type
+        )}`
       );
       if (!presignRes.ok) throw new Error(`Presign failed ${presignRes.status}`);
       const { url: presignedUrl } = await presignRes.json();
 
-      // 5b) upload
+      // b) Upload blob
       const blob = await uriToBlob(asset.uri);
       const uploadRes = await fetch(presignedUrl, {
-        method:'PUT',
-        headers:{
+        method: 'PUT',
+        headers: {
           'Content-Type': asset.type,
-          'x-amz-acl':     'public-read'
+          'x-amz-acl': 'public-read',
         },
-        body: blob
+        body: blob,
       });
       if (!uploadRes.ok) throw new Error(`Upload failed ${uploadRes.status}`);
 
-      // 5c) update Firebase profile
-      const publicUrl = `https://${S3_BUCKET_NAME}.s3.eu-west-1.amazonaws.com/profile-photos/${filename}`;
-      await updateProfile(auth.currentUser,{ photoURL: publicUrl });
+      // c) Update Firebase profile
+      const publicUrl = `https://${S3_BUCKET_NAME}.s3.eu-west-1.amazonaws.com/${filename}`;
+      await updateProfile(auth.currentUser, { photoURL: publicUrl });
 
-      // 5d) show instantly
+      // d) Show instantly
       setProfilePhotoUri(`${publicUrl}?t=${Date.now()}`);
       setShowProfileModal(false);
     } catch (err) {
@@ -197,57 +219,71 @@ const Dashboard = ({ navigation }) => {
     }
   };
 
-  // 6) Open maps
-  const openInGoogleMaps = (lat,lon) => {
+  // 6) Open native maps
+  const openInGoogleMaps = (lat, lon) => {
     const label = 'Litter Report';
-    const url = Platform.OS==='ios'
-      ? `http://maps.apple.com/?q=${encodeURIComponent(label)}&ll=${lat},${lon}`
-      : `geo:0,0?q=${lat},${lon}(${encodeURIComponent(label)})`;
+    const url =
+      Platform.OS === 'ios'
+        ? `http://maps.apple.com/?q=${encodeURIComponent(label)}&ll=${lat},${lon}`
+        : `geo:0,0?q=${lat},${lon}(${encodeURIComponent(label)})`;
+
     Linking.canOpenURL(url)
-      .then(s=> s? Linking.openURL(url) : Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`))
-      .catch(()=>Alert.alert('Error','Could not open map.'));
+      .then(supported =>
+        supported
+          ? Linking.openURL(url)
+          : Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`)
+      )
+      .catch(() => Alert.alert('Error', 'Could not open map.'));
   };
 
-  // 7) Render one report
-  const renderReport = ({item}) => {
-    const lat = parseFloat(item.latitude), lon = parseFloat(item.longitude);
-    const valid = isValidLatLng(lat,lon);
-    const region = valid && { latitude:lat, longitude:lon, latitudeDelta:0.01, longitudeDelta:0.01 };
+  // 7) Render a single report card
+  const renderReport = ({ item }) => {
+    const lat = parseFloat(item.latitude);
+    const lon = parseFloat(item.longitude);
+    const valid = isValidLatLng(lat, lon);
+    const region =
+      valid && { latitude: lat, longitude: lon, latitudeDelta: 0.01, longitudeDelta: 0.01 };
     const prioStyle = item.isClean
       ? styles.priorityClean
-      : styles[`priority${item.priority.charAt(0).toUpperCase()+item.priority.slice(1)}`];
+      : styles[`priority${item.priority.charAt(0).toUpperCase() + item.priority.slice(1)}`];
 
     return (
       <View style={styles.reportCard}>
         <View style={styles.reportRow}>
           <View style={styles.reportTextContainer}>
-            {['Town','County','Country','Email'].map(f=>(
+            {['Town', 'County', 'Country', 'Email'].map(f => (
               <Text key={f} style={styles.row} numberOfLines={1} ellipsizeMode="tail">
                 <Text style={styles.label}>{f}: </Text>
                 <Text style={styles.value}>
-                  {item[f.toLowerCase()]?.includes('Error')?'N/A':item[f.toLowerCase()]}
+                  {item[f.toLowerCase()]?.includes('Error') ? 'N/A' : item[f.toLowerCase()]}
                 </Text>
               </Text>
             ))}
             {!item.isClean ? (
               <Text style={styles.row}>
                 <Text style={styles.label}>Priority: </Text>
-                <Text style={[styles.value,prioStyle]}>{item.priority.toUpperCase()}</Text>
+                <Text style={[styles.value, prioStyle]}>{item.priority.toUpperCase()}</Text>
               </Text>
             ) : (
               <Text style={styles.row}>
-                <Text style={[styles.label,styles.priorityClean]}>Status: </Text>
-                <Text style={[styles.value,styles.priorityClean]}>Cleaned</Text>
+                <Text style={[styles.label, styles.priorityClean]}>Status: </Text>
+                <Text style={[styles.value, styles.priorityClean]}>Cleaned</Text>
               </Text>
             )}
             <Text style={styles.row}>
               <Text style={styles.label}>Reported: </Text>
-              <Text style={styles.value}>{new Date(item.reportedAt).toLocaleDateString()}</Text>
+              <Text style={styles.value}>
+                {new Date(item.reportedAt).toLocaleDateString()}
+              </Text>
             </Text>
           </View>
           <View style={styles.reportMapContainer}>
             {valid && REACT_APP_GOOGLE_MAPS_API_KEY ? (
-              <TouchableOpacity style={styles.mapTouchable} onPress={()=>openInGoogleMaps(lat,lon)} activeOpacity={0.7}>
+              <TouchableOpacity
+                style={styles.mapTouchable}
+                onPress={() => openInGoogleMaps(lat, lon)}
+                activeOpacity={0.7}
+              >
                 <MapView
                   provider={PROVIDER_GOOGLE}
                   style={styles.reportMap}
@@ -259,19 +295,24 @@ const Dashboard = ({ navigation }) => {
                   toolbarEnabled={false}
                   liteMode
                 >
-                  <Marker coordinate={{latitude:lat,longitude:lon}} pinColor="red"/>
+                  <Marker coordinate={{ latitude: lat, longitude: lon }} pinColor="red" />
                 </MapView>
               </TouchableOpacity>
             ) : (
               <View style={styles.noLocationContainer}>
-                <Text style={styles.noLocationText}>{valid?'Map N/A':'No location'}</Text>
+                <Text style={styles.noLocationText}>
+                  {valid ? 'Map N/A' : 'No location'}
+                </Text>
               </View>
             )}
           </View>
         </View>
         <View style={styles.reportButtons}>
           {!item.isClean && (
-            <TouchableOpacity style={[styles.actionButton,{backgroundColor:'#FF5252'}]} onPress={()=>deleteReport(item._id)}>
+            <TouchableOpacity
+              style={[styles.actionButton, { backgroundColor: '#FF5252' }]}
+              onPress={() => deleteReport(item._id)}
+            >
               <Text style={styles.actionButtonText}>Delete</Text>
             </TouchableOpacity>
           )}
@@ -282,31 +323,46 @@ const Dashboard = ({ navigation }) => {
 
   // 8) Profile modal
   const renderProfileModal = () => (
-    <Modal visible={showProfileModal} transparent animationType="slide" onRequestClose={()=>setShowProfileModal(false)}>
+    <Modal
+      visible={showProfileModal}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setShowProfileModal(false)}
+    >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContainer}>
           <Text style={styles.modalHeader}>Your Profile</Text>
           {uploading ? (
-            <ActivityIndicator size="large" color="#03DAC6"/>
+            <ActivityIndicator size="large" color="#03DAC6" />
           ) : profilePhotoUri ? (
-            <Image source={{uri:profilePhotoUri}} style={styles.profilePhotoLarge}/>
+            <Image source={{ uri: profilePhotoUri }} style={styles.profilePhotoLarge} />
           ) : (
-            <View style={[styles.profilePhotoLarge,styles.avatarPlaceholder]}>
-              <Text style={styles.avatarPlaceholderText}>{userEmail.charAt(0).toUpperCase()}</Text>
+            <View style={[styles.profilePhotoLarge, styles.avatarPlaceholder]}>
+              <Text style={styles.avatarPlaceholderText}>
+                {userEmail.charAt(0).toUpperCase()}
+              </Text>
             </View>
           )}
           <Text style={styles.profileEmail}>{userEmail}</Text>
           <TouchableOpacity style={styles.modalButton} onPress={pickOrTakePhoto}>
-            <Text style={styles.modalButtonText}>{profilePhotoUri?'Change Photo':'Add Photo'}</Text>
+            <Text style={styles.modalButtonText}>
+              {profilePhotoUri ? 'Change Photo' : 'Add Photo'}
+            </Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.modalButton,styles.logoutModalButton]} onPress={()=>{
-            auth.signOut();
-            setShowProfileModal(false);
-            navigation.replace('Login');
-          }}>
+          <TouchableOpacity
+            style={[styles.modalButton, styles.logoutModalButton]}
+            onPress={() => {
+              auth.signOut();
+              setShowProfileModal(false);
+              navigation.replace('Login');
+            }}
+          >
             <Text style={styles.modalButtonText}>Logout</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.modalButton,styles.cancelButton]} onPress={()=>setShowProfileModal(false)}>
+          <TouchableOpacity
+            style={[styles.modalButton, styles.cancelButton]}
+            onPress={() => setShowProfileModal(false)}
+          >
             <Text style={styles.modalButtonText}>Close</Text>
           </TouchableOpacity>
         </View>
@@ -317,17 +373,28 @@ const Dashboard = ({ navigation }) => {
   // 9) Main render
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#1E1E1E"/>
+      <StatusBar barStyle="light-content" backgroundColor="#1E1E1E" />
 
-      {/* Navbar */}
+      {/* Navbar with Back Arrow */}
       <View style={styles.navbar}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+        >
+          <Text style={styles.backButtonText}>←</Text>
+        </TouchableOpacity>
         <Text style={styles.navbarTitle}>Dashboard</Text>
-        <TouchableOpacity style={styles.avatarContainer} onPress={()=>setShowProfileModal(true)}>
+        <TouchableOpacity
+          style={styles.avatarContainer}
+          onPress={() => setShowProfileModal(true)}
+        >
           {profilePhotoUri ? (
-            <Image source={{uri:profilePhotoUri}} style={styles.avatar}/>
+            <Image source={{ uri: profilePhotoUri }} style={styles.avatar} />
           ) : (
-            <View style={[styles.avatar,styles.avatarPlaceholder]}>
-              <Text style={styles.avatarPlaceholderText}>{userEmail.charAt(0).toUpperCase()}</Text>
+            <View style={[styles.avatar, styles.avatarPlaceholder]}>
+              <Text style={styles.avatarPlaceholderText}>
+                {userEmail.charAt(0).toUpperCase()}
+              </Text>
             </View>
           )}
         </TouchableOpacity>
@@ -336,17 +403,31 @@ const Dashboard = ({ navigation }) => {
       {/* Filters */}
       <View style={styles.filterBar}>
         {['all','high','medium','low','clean'].map(key => {
-          const label = key.charAt(0).toUpperCase()+key.slice(1);
-          const count = key==='all'
-            ? reports.length
-            : reports.filter(r => key==='clean' ? r.isClean : (!r.isClean && r.priority===key)).length;
+          const label = key.charAt(0).toUpperCase() + key.slice(1);
+          const count =
+            key === 'all'
+              ? reports.length
+              : reports.filter(r =>
+                  key === 'clean'
+                    ? r.isClean
+                    : (!r.isClean && r.priority === key)
+                ).length;
           return (
             <TouchableOpacity
               key={key}
-              style={[styles.filterButton, key!=='all' && styles[`filterButton${label}`], filterSelection===key && styles.filterButtonActive]}
-              onPress={()=>setFilterSelection(key)}
+              style={[
+                styles.filterButton,
+                key !== 'all' && styles[`filterButton${label}`],
+                filterSelection === key && styles.filterButtonActive
+              ]}
+              onPress={() => setFilterSelection(key)}
             >
-              <Text style={[styles.filterButtonText, filterSelection===key && styles.filterButtonTextActive]}>
+              <Text
+                style={[
+                  styles.filterButtonText,
+                  filterSelection === key && styles.filterButtonTextActive
+                ]}
+              >
                 {label} ({count})
               </Text>
             </TouchableOpacity>
@@ -354,16 +435,18 @@ const Dashboard = ({ navigation }) => {
         })}
       </View>
 
-      {/* List / Loader */}
+      {/* List or Loader */}
       <View style={styles.listArea}>
         {loading && !reports.length ? (
-          <ActivityIndicator style={styles.loader} size="large" color="#1E90FF"/>
-        ) : (!filteredAndSorted.length ? (
-          <Text style={styles.noReportsText}>{userEmail ? `No reports for '${filterSelection}'` : 'Please log in.'}</Text>
+          <ActivityIndicator style={styles.loader} size="large" color="#1E90FF" />
+        ) : !filteredAndSorted.length ? (
+          <Text style={styles.noReportsText}>
+            {userEmail ? `No reports for '${filterSelection}'` : 'Please log in.'}
+          </Text>
         ) : (
           <FlatList
             data={pageItems}
-            keyExtractor={i=>i._id}
+            keyExtractor={item => item._id}
             renderItem={renderReport}
             contentContainerStyle={styles.reportList}
             initialNumToRender={itemsPerPage}
@@ -371,24 +454,29 @@ const Dashboard = ({ navigation }) => {
             windowSize={5}
             removeClippedSubviews={false}
           />
-        ))}
+        )}
       </View>
 
       {/* Pagination */}
-      {!loading && filteredAndSorted.length>itemsPerPage && (
+      {!loading && filteredAndSorted.length > itemsPerPage && (
         <View style={styles.pagination}>
           <TouchableOpacity
-            style={[styles.pageButton, currentPage===0 && styles.disabledButton]}
-            disabled={currentPage===0}
-            onPress={()=>setCurrentPage(p=>Math.max(p-1,0))}
+            style={[styles.pageButton, currentPage === 0 && styles.disabledButton]}
+            disabled={currentPage === 0}
+            onPress={() => setCurrentPage(p => Math.max(p - 1, 0))}
           >
             <Text style={styles.pageButtonText}>Prev</Text>
           </TouchableOpacity>
-          <Text style={styles.pageInfo}>Page {currentPage+1} of {totalPages}</Text>
+          <Text style={styles.pageInfo}>
+            Page {currentPage + 1} of {totalPages}
+          </Text>
           <TouchableOpacity
-            style={[styles.pageButton, currentPage>=totalPages-1 && styles.disabledButton]}
-            disabled={currentPage>=totalPages-1}
-            onPress={()=>setCurrentPage(p=>Math.min(p+1,totalPages-1))}
+            style={[
+              styles.pageButton,
+              currentPage >= totalPages - 1 && styles.disabledButton
+            ]}
+            disabled={currentPage >= totalPages - 1}
+            onPress={() => setCurrentPage(p => Math.min(p + 1, totalPages - 1))}
           >
             <Text style={styles.pageButtonText}>Next</Text>
           </TouchableOpacity>
@@ -397,10 +485,28 @@ const Dashboard = ({ navigation }) => {
 
       {/* Bottom Buttons */}
       <View style={styles.bottomButtonContainer}>
-        <TouchableOpacity style={[styles.reportButton,{backgroundColor:'#03DAC6'}]} onPress={()=>navigation.navigate('CleanerTasks')}>
-          <Text style={[styles.reportButtonText,{color:'#121212'}]}>View Cleanup Tasks</Text>
+        <TouchableOpacity
+          style={[styles.reportButton, styles.leaderboardButton]}
+          onPress={() => navigation.navigate('Leaderboard')}
+        >
+          <Text style={[styles.reportButtonText, { color: '#121212' }]}>
+            👑 Leaderboard
+          </Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.reportButton} onPress={()=>navigation.navigate('Map')}>
+
+        <TouchableOpacity
+          style={[styles.reportButton, { backgroundColor: '#03DAC6' }]}
+          onPress={() => navigation.navigate('CleanerTasks')}
+        >
+          <Text style={[styles.reportButtonText, { color: '#121212' }]}>
+            View Cleanup Tasks
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.reportButton}
+          onPress={() => navigation.navigate('Map')}
+        >
           <Text style={styles.reportButtonText}>Report Litter Now</Text>
         </TouchableOpacity>
       </View>

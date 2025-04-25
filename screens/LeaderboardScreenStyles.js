@@ -1,24 +1,42 @@
+// screens/LeaderboardScreenStyles.js
+
 import { StyleSheet } from 'react-native';
 
-const styles = StyleSheet.create({
+export default StyleSheet.create({
+   // Header with back arrow
+backHeader: {
+     flexDirection: 'row',
+     alignItems: 'center',
+     paddingHorizontal: 10,
+     paddingVertical: 12,
+     backgroundColor: '#121212',
+  },
+   backButton: {
+     marginRight: 10,
+    },
+    backArrow: {
+      fontSize: 24,
+     color: '#FFFFFF',
+    },
   safeArea: {
     flex: 1,
-    backgroundColor: '#121212', // Dark background for the whole screen area
+    backgroundColor: '#121212',
   },
   container: {
     flex: 1,
     paddingHorizontal: 10,
-    paddingTop: 10, // Adjust as needed if using a custom header
-    backgroundColor: '#121212', // Dark theme background
+    paddingTop: 10,
+    backgroundColor: '#121212',
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: '#FFFFFF', // White text
+    color: '#FFFFFF',
     textAlign: 'center',
     marginBottom: 20,
     marginTop: 10,
   },
+
   loader: {
     flex: 1,
     justifyContent: 'center',
@@ -28,7 +46,7 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
     marginTop: 50,
-    color: '#FF6B6B', // Reddish color for errors
+    color: '#FF6B6B',
     fontSize: 16,
     paddingHorizontal: 20,
   },
@@ -36,82 +54,171 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
     marginTop: 50,
-    color: '#AAAAAA', // Greyish text for empty state
+    color: '#AAAAAA',
     fontSize: 16,
   },
   listContentContainer: {
-    paddingBottom: 20, // Add padding at the bottom of the list
+    paddingBottom: 20,
   },
-  // Header Row Styles
+
+  // Header Card
+  headerCard: {
+    marginHorizontal: 5,
+    backgroundColor: '#1E1E1E',
+    borderRadius: 8,
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
   headerRow: {
     flexDirection: 'row',
     paddingVertical: 12,
-    borderBottomWidth: 2,
-    borderBottomColor: '#03DAC6', // Accent color border
-    backgroundColor: '#1E1E1E', // Slightly lighter background for header
-    marginBottom: 5,
-    paddingHorizontal: 5, // Padding inside the header row
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#03DAC6',
   },
   headerText: {
-    color: '#E0E0E0', // Lighter grey text for headers
+    color: '#E0E0E0',
     fontWeight: 'bold',
     fontSize: 14,
     textAlign: 'center',
   },
-  rankHeader: {
-    flex: 0.1, // ~10% width for rank
-    textAlign: 'left',
+  rankHeader: { flex: 0.1, textAlign: 'left' },
+  userHeader: { flex: 0.4, textAlign: 'left' },
+  countHeader: { flex: 0.125, textAlign: 'center' },
+
+  // Row Card
+  card: {
+    marginHorizontal: 5,
+    borderRadius: 8,
+    marginVertical: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  userHeader: {
-    flex: 0.4, // ~40% width for user email
-    textAlign: 'left',
-    paddingLeft: 5,
+  cardEven: { backgroundColor: '#1E1E1E' },
+  cardOdd: { backgroundColor: '#242424' },
+  topCard: {
+    borderColor: '#FFD700',
+    borderWidth: 2,
   },
-  countHeader: {
-    flex: 0.125, // ~12.5% width for each count (Total, H, M, L)
-  },
-  // Item Row Styles
-  itemRow: {
+
+  cardContent: {
     flexDirection: 'row',
-    alignItems: 'center', // Vertically center items in the row
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333333', // Darker separator line
-    paddingHorizontal: 5, // Padding inside item rows
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 10,
   },
+
   itemText: {
-    color: '#FFFFFF', // White text for items
+    color: '#FFFFFF',
     fontSize: 14,
     textAlign: 'center',
   },
+  rankContainer: {
+    flex: 0.1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  crownIcon: {
+    width: 20,
+    height: 20,
+    resizeMode: 'contain',
+  },
+
+  // Default rank styling (for 4th and below)
   rank: {
-    flex: 0.1, // Match header width
+    flex: 0.1,
     textAlign: 'left',
     fontWeight: 'bold',
-    color: '#BB86FC', // Purple accent for rank
+    color: '#BB86FC',
   },
+
+  // Top-three special colors
+  rankGold: {
+    flex: 0.1,
+    textAlign: 'left',
+    fontWeight: 'bold',
+    color: '#FFD700',
+  },
+  rankSilver: {
+    flex: 0.1,
+    textAlign: 'left',
+    fontWeight: 'bold',
+    color: '#C0C0C0',
+  },
+  rankBronze: {
+    flex: 0.1,
+    textAlign: 'left',
+    fontWeight: 'bold',
+    color: '#CD7F32',
+  },
+
   user: {
-    flex: 0.4, // Match header width
+    flex: 0.4,
     textAlign: 'left',
-    paddingLeft: 5,
-    color: '#E0E0E0', // Lighter grey for email
+    paddingLeft: 10,
+    color: '#E0E0E0',
   },
-  count: {
-    flex: 0.125, // Match header width
+  count: { flex: 0.125 },
+
+  // Priority colors
+  priorityHigh: { color: '#FF7043', fontWeight: 'bold' },
+  priorityMedium: { color: '#FFCA28', fontWeight: 'bold' },
+  priorityLow: { color: '#66BB6A', fontWeight: 'bold' },
+
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  // Priority Colors (reusing styles from Dashboard potentially)
-  priorityHigh: {
-    color: '#FF7043', // Example: Orange/Red for High
+  modalContainer: {
+    width: '80%',
+    backgroundColor: '#1F1F1F',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+  },
+  modalRank: {
+    fontSize: 32,
     fontWeight: 'bold',
+    color: '#FFD700',
+    marginBottom: 10,
   },
-  priorityMedium: {
-    color: '#FFCA28', // Example: Amber/Yellow for Medium
-    fontWeight: 'bold',
+  modalEmail: {
+    fontSize: 18,
+    color: '#FFFFFF',
+    marginBottom: 20,
+    textAlign: 'center',
   },
-  priorityLow: {
-    color: '#66BB6A', // Example: Green for Low
+  modalStatsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 20,
+  },
+  modalStat: {
+    color: '#E0E0E0',
+    fontSize: 16,
+    flex: 1,
+    textAlign: 'center',
+  },
+  modalCloseButton: {
+    marginTop: 10,
+    backgroundColor: '#03DAC6',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+  },
+  modalCloseText: {
+    color: '#000',
     fontWeight: 'bold',
   },
 });
-
-export default styles;

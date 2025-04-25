@@ -20,6 +20,13 @@ export default StyleSheet.create({
     paddingHorizontal: H_PAD,
     marginBottom: 8,
   },
+  backButton: {
+    marginRight: 12,
+  },
+  backButtonText: {
+    fontSize: 24,
+    color: '#FFFFFF',
+  },
   navbarTitle: {
     fontSize: 28,
     fontWeight: '700',
@@ -253,6 +260,11 @@ export default StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#121212',
+  },
+
+  // **Gold Leaderboard** button
+  leaderboardButton: {
+    backgroundColor: '#FFD700',
   },
 
   // Modal overlay & container
