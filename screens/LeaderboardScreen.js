@@ -13,8 +13,6 @@ import {
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { REACT_APP_SERVER_URL } from '@env';
 import styles from './LeaderboardScreenStyles';
-
-// Crown icon for the top spot
 const crownIcon = require('../assets/crown.png');
 
 const LeaderboardScreen = () => {
