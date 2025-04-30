@@ -1282,62 +1282,72 @@ function haversineDistance(coords1, coords2) {
 
       <View style={styles.bottomSectionContainer}>
 
-        <View style={styles.deviceStatusContainer}>
-          <Text style={[styles.deviceStatusText, { color: esp32Connected ? '#4CAF50' : '#f44336' }]}>
-            {esp32Connected ? 'Device Connected' : esp32Device ? 'Device Disconnected!' : 'Searching for Device...'}
-          </Text>
-          {!esp32Connected && (
-            <TouchableOpacity
-              onPress={scanForESP32}
-              style={styles.rescanButton}
-              disabled={!!esp32Device && !esp32Connected}
-            >
-              <Text style={styles.rescanButtonText}>Scan</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+      <View style={styles.deviceStatusContainer}>
+  <Text style={[styles.deviceStatusText, { color: esp32Connected ? '#4CAF50' : '#f44336' }]}>
+    {esp32Connected
+      ? 'Device Connected'
+      : esp32Device
+        ? 'Device Disconnected!'
+        : 'Searching for Device...'}
+  </Text>
+
+  { !esp32Connected && (
+    <TouchableOpacity
+      onPress={scanForESP32}
+      style={styles.scanButton}
+      disabled={!!esp32Device && !esp32Connected}
+    >
+      <Text style={styles.scanButtonText}>Scan</Text>
+    </TouchableOpacity>
+  )}
+</View>
 
 
         <View style={styles.extraButtonContainer}>
-          <TouchableOpacity
-            style={styles.extraButton}
-            onPress={() => navigation.navigate('Dashboard', { username: userEmail })}
-          >
-            <Text style={styles.extraButtonText}>Dashboard</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.extraButton} onPress={handleManualReport}>
-            <Text style={styles.extraButtonText}>Report</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.extraButton}
-            onPress={() => {
-              if (userMarkers && userMarkers.length > 0) {
-                setSelectedMarkerIndex(0);
-                setSelectedReport(userMarkers[0]);
-                setShowPreviewModal(true);
-                setExpandedClusterId(null);
-              } else {
-                Alert.alert('No Reports', 'You have no active litter reports.');
-                fetchReports();
-              }
-            }}
-          >
-            <Text style={styles.extraButtonText}>My Reports ({userMarkers.length})</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.extraButton, { backgroundColor: '#607d8b' }]}
-            onPress={handleLogout}
-          >
-            <Text style={styles.extraButtonText}>Logout</Text>
-          </TouchableOpacity>
-        </View>
+  <TouchableOpacity
+    style={[styles.extraButton, styles.dashboardButton]}
+    onPress={() => navigation.navigate('Dashboard', { username: userEmail })}
+  >
+    <Text style={styles.extraButtonText}>Dashboard</Text>
+  </TouchableOpacity>
 
+  <TouchableOpacity
+    style={[styles.extraButton, styles.reportButton]}
+    onPress={handleManualReport}
+  >
+    <Text style={styles.extraButtonText}>Report</Text>
+  </TouchableOpacity>
 
-        <View style={styles.emailContainer}>
-          <Text style={styles.emailText} numberOfLines={1} ellipsizeMode="tail">
-            Logged in as: {userEmail || 'Guest'}
-          </Text>
-        </View>
+  <TouchableOpacity
+    style={[styles.extraButton, styles.myReportsButton]}
+    onPress={() => {
+      if (userMarkers && userMarkers.length > 0) {
+        setSelectedMarkerIndex(0);
+        setSelectedReport(userMarkers[0]);
+        setShowPreviewModal(true);
+        setExpandedClusterId(null);
+      } else {
+        Alert.alert('No Reports', 'You have no active litter reports.');
+        fetchReports();
+      }
+    }}
+  >
+    <Text style={styles.extraButtonText}>My Reports ({userMarkers.length})</Text>
+  </TouchableOpacity>
+
+  <TouchableOpacity
+    style={[styles.extraButton, styles.logoutButton]}
+    onPress={handleLogout}
+  >
+    <Text style={styles.extraButtonText}>Logout</Text>
+  </TouchableOpacity>
+</View>
+
+<View style={styles.emailContainer}>
+  <Text style={styles.emailText} numberOfLines={1} ellipsizeMode="tail">
+    Logged in as: {userEmail || 'Guest'}
+  </Text>
+</View>
       </View>
 
 

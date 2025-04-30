@@ -1,41 +1,71 @@
-
+// routes/s3.js
+require('dotenv').config();           // load .env when running locally
 const express = require('express');
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const {
+  S3Client,
+  PutObjectCommand,
+} = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
-require('dotenv').config();
 
 const router = express.Router();
 
+/* ─────────────────────────  AWS CONFIG  ───────────────────────── */
+
+const {
+  AWS_REGION        = 'eu-west-1',
+  AWS_ACCESS_KEY_ID,
+  AWS_SECRET_ACCESS_KEY,
+  S3_BUCKET_NAME    = 'litterwarden',
+} = process.env;
+
+if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
+  console.warn(
+    '[routes/s3] AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are missing – presign route will fail'
+  );
+}
+
 const s3 = new S3Client({
-  region: process.env.AWS_REGION || 'eu-west-1',
+  region: AWS_REGION,
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  }
+    accessKeyId:     AWS_ACCESS_KEY_ID,
+    secretAccessKey: AWS_SECRET_ACCESS_KEY,
+  },
 });
 
+/* ─────────────────────────  ROUTE  ───────────────────────── */
+
 router.get('/presign', async (req, res) => {
-  const { filename, type } = req.query;
+  const { filename, type, folder = 'reports' } = req.query;
+
+  /* basic validation */
   if (!filename || !type) {
     return res.status(400).json({ error: 'Missing filename or type' });
   }
-  if (!process.env.S3_BUCKET_NAME) {
-    console.error("S3_BUCKET_NAME is not defined");
-    return res.status(500).json({ error: 'Bucket name missing' });
+  if (!['reports', 'profile-photos'].includes(folder)) {
+    return res.status(400).json({
+      error: 'Invalid folder (must be "reports" or "profile-photos")',
+    });
   }
+
+  const key = `${folder}/${filename}`;
 
   try {
     const cmd = new PutObjectCommand({
-      Bucket: process.env.S3_BUCKET_NAME,
-      Key: `profile-photos/${filename}`,   
+      Bucket:      S3_BUCKET_NAME,
+      Key:         key,
       ContentType: type,
-      ACL: 'public-read'               
     });
+
+    // Presigned URL valid for 60 seconds
     const url = await getSignedUrl(s3, cmd, { expiresIn: 60 });
-    res.json({ url });
+
+    console.log(`[routes/s3] Generated presign for ${key}`);
+    return res.json({ url, key });
   } catch (err) {
-    console.error('Presign error:', err);
-    res.status(500).json({ error: 'Failed to generate URL' });
+    console.error('[routes/s3] Presign error:', err);
+    return res
+      .status(500)
+      .json({ error: 'Failed to generate URL', details: err.message });
   }
 });
 

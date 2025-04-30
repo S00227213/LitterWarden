@@ -1,3 +1,5 @@
+// src/screens/DashboardScreen.js
+
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
@@ -10,9 +12,10 @@ import {
   Modal,
   Linking,
   Platform,
-  Image,
+  Image
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import Toast from 'react-native-toast-message';
 import { onAuthStateChanged, updateProfile } from 'firebase/auth';
 import { auth } from '../firebaseConfig';
 import { useFocusEffect } from '@react-navigation/native';
@@ -21,10 +24,15 @@ import {
   REACT_APP_GOOGLE_MAPS_API_KEY,
   REACT_APP_SERVER_URL,
   S3_BUCKET_NAME,
+  REACT_APP_AWS_REGION
 } from '@env';
 import styles from './DashboardScreenStyles';
 
-// Utility: Convert file:// URI to Blob
+// Placeholder silhouette for users without a profile photo.
+// Place an image file at src/assets/silhouette.png
+const SILHOUETTE = require('../assets/silhouette.png');
+
+// Convert a file:// URI into a Blob
 const uriToBlob = uri =>
   new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -35,37 +43,45 @@ const uriToBlob = uri =>
     xhr.send(null);
   });
 
-// Utility: Validate lat/lng
+// Validate latitude/longitude
 const isValidLatLng = (lat, lon) => {
-  const pLat = parseFloat(lat), pLon = parseFloat(lon);
-  return !isNaN(pLat) && !isNaN(pLon) && Math.abs(pLat) <= 90 && Math.abs(pLon) <= 180;
+  const pLat = parseFloat(lat),
+        pLon = parseFloat(lon);
+  return (
+    !isNaN(pLat) &&
+    !isNaN(pLon) &&
+    Math.abs(pLat) <= 90 &&
+    Math.abs(pLon) <= 180
+  );
 };
 
 const Dashboard = ({ navigation }) => {
   const SERVER_URL = REACT_APP_SERVER_URL;
-  const [reports, setReports] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [userEmail, setUserEmail] = useState('');
+  const REGION     = REACT_APP_AWS_REGION || 'eu-west-1';
+
+  const [reports, setReports]                 = useState([]);
+  const [loading, setLoading]                 = useState(true);
+  const [userEmail, setUserEmail]             = useState('');
   const [profilePhotoUri, setProfilePhotoUri] = useState(null);
-  const [uploading, setUploading] = useState(false);
+  const [uploading, setUploading]             = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [currentPage, setCurrentPage] = useState(0);
+  const [currentPage, setCurrentPage]         = useState(0);
   const [filterSelection, setFilterSelection] = useState('all');
-  const itemsPerPage = 9;
+  const itemsPerPage                          = 9;
 
   // 1) Auth listener + load photoURL
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, user => {
+    const unsubscribe = onAuthStateChanged(auth, user => {
       if (user) {
         setUserEmail(user.email);
         if (user.photoURL) {
-          setProfilePhotoUri(`${user.photoURL}?t=${Date.now()}`); 
+          setProfilePhotoUri(`${user.photoURL}?t=${Date.now()}`);
         }
       } else {
         navigation.replace('Login');
       }
     });
-    return unsub;
+    return unsubscribe;
   }, [navigation]);
 
   // 2) Fetch reports
@@ -85,7 +101,7 @@ const Dashboard = ({ navigation }) => {
     } finally {
       setLoading(false);
     }
-  }, [userEmail, SERVER_URL]);
+  }, [SERVER_URL, userEmail]);
 
   useFocusEffect(
     useCallback(() => {
@@ -107,14 +123,21 @@ const Dashboard = ({ navigation }) => {
             try {
               const resp = await fetch(`${SERVER_URL}/report/${reportId}`, { method: 'DELETE' });
               if (!resp.ok) throw new Error(`Status ${resp.status}`);
-              setReports(r => r.filter(x => x._id !== reportId));
+              setReports(prev => prev.filter(r => r._id !== reportId));
+              Toast.show({
+                type: 'success',
+                text1: 'Report Deleted',
+                text2: 'Report was deleted successfully.',
+                position: 'bottom',
+                visibilityTime: 3000
+              });
             } catch (err) {
               Alert.alert('Error', err.message);
             } finally {
               setLoading(false);
             }
-          },
-        },
+          }
+        }
       ]);
     },
     [SERVER_URL]
@@ -127,13 +150,13 @@ const Dashboard = ({ navigation }) => {
 
     if (filterSelection === 'clean') {
       list = list.filter(r => r.isClean);
-    } else if (['high', 'medium', 'low'].includes(filterSelection)) {
+    } else if (['high','medium','low'].includes(filterSelection)) {
       list = list.filter(r => !r.isClean && r.priority === filterSelection);
     }
 
     list.sort((a, b) => {
       if (!a.isClean && b.isClean) return -1;
-      if (a.isClean && !b.isClean) return 1;
+      if (a.isClean  && !b.isClean) return 1;
       if (!a.isClean && !b.isClean) {
         return (priorityOrder[b.priority] || 0) - (priorityOrder[a.priority] || 0);
       }
@@ -144,12 +167,12 @@ const Dashboard = ({ navigation }) => {
   }, [reports, filterSelection]);
 
   const totalPages = Math.ceil(filteredAndSorted.length / itemsPerPage);
-  const pageItems = filteredAndSorted.slice(
+  const pageItems  = filteredAndSorted.slice(
     currentPage * itemsPerPage,
     (currentPage + 1) * itemsPerPage
   );
 
-  // 5) Profile photo upload
+  // 5) Prompt for photo source
   const pickOrTakePhoto = () => {
     Alert.alert('Select Profile Photo', 'Choose image source:', [
       {
@@ -158,7 +181,7 @@ const Dashboard = ({ navigation }) => {
           launchCamera(
             { mediaType: 'photo', quality: 0.7, maxWidth: 512, maxHeight: 512 },
             handleImage
-          ),
+          )
       },
       {
         text: 'Library',
@@ -166,27 +189,28 @@ const Dashboard = ({ navigation }) => {
           launchImageLibrary(
             { mediaType: 'photo', quality: 0.7, maxWidth: 512, maxHeight: 512 },
             handleImage
-          ),
+          )
       },
-      { text: 'Cancel', style: 'cancel' },
+      { text: 'Cancel', style: 'cancel' }
     ]);
   };
 
+  // 6) Handle the image
   const handleImage = async response => {
     if (response.didCancel) return;
     if (response.errorMessage) return Alert.alert('Image Error', response.errorMessage);
+
     const asset = response.assets?.[0];
     if (!asset?.uri) return;
 
     setUploading(true);
     try {
-      const ext = asset.fileName?.split('.').pop() || 'jpg';
+      const ext       = asset.fileName?.split('.').pop() || 'jpg';
       const safeEmail = userEmail.replace(/[@.]/g, '_');
-      const filename = `${safeEmail}_${Date.now()}.${ext}`;
+      const filename  = `${safeEmail}_${Date.now()}.${ext}`;
+
       const presignRes = await fetch(
-        `${SERVER_URL}/s3/presign?filename=${encodeURIComponent(filename)}&type=${encodeURIComponent(
-          asset.type
-        )}`
+        `${SERVER_URL}/s3/presign?filename=${encodeURIComponent(filename)}&type=${encodeURIComponent(asset.type)}`
       );
       if (!presignRes.ok) throw new Error(`Presign failed ${presignRes.status}`);
       const { url: presignedUrl } = await presignRes.json();
@@ -194,14 +218,12 @@ const Dashboard = ({ navigation }) => {
       const blob = await uriToBlob(asset.uri);
       const uploadRes = await fetch(presignedUrl, {
         method: 'PUT',
-        headers: {
-          'Content-Type': asset.type,
-          'x-amz-acl': 'public-read',
-        },
-        body: blob,
+        headers: { 'Content-Type': asset.type },
+        body: blob
       });
       if (!uploadRes.ok) throw new Error(`Upload failed ${uploadRes.status}`);
-      const publicUrl = `https://${S3_BUCKET_NAME}.s3.eu-west-1.amazonaws.com/${filename}`;
+
+      const publicUrl = `https://${S3_BUCKET_NAME}.s3.${REGION}.amazonaws.com/profile-photos/${filename}`;
       await updateProfile(auth.currentUser, { photoURL: publicUrl });
 
       setProfilePhotoUri(`${publicUrl}?t=${Date.now()}`);
@@ -212,6 +234,8 @@ const Dashboard = ({ navigation }) => {
       setUploading(false);
     }
   };
+
+  // 7) Open in maps
   const openInGoogleMaps = (lat, lon) => {
     const label = 'Litter Report';
     const url =
@@ -228,12 +252,12 @@ const Dashboard = ({ navigation }) => {
       .catch(() => Alert.alert('Error', 'Could not open map.'));
   };
 
-  // 7) Render a single report card
+  // 8) Render a single report card
   const renderReport = ({ item }) => {
-    const lat = parseFloat(item.latitude);
-    const lon = parseFloat(item.longitude);
+    const lat   = parseFloat(item.latitude);
+    const lon   = parseFloat(item.longitude);
     const valid = isValidLatLng(lat, lon);
-    const region =
+    const regionObj =
       valid && { latitude: lat, longitude: lon, latitudeDelta: 0.01, longitudeDelta: 0.01 };
     const prioStyle = item.isClean
       ? styles.priorityClean
@@ -243,23 +267,27 @@ const Dashboard = ({ navigation }) => {
       <View style={styles.reportCard}>
         <View style={styles.reportRow}>
           <View style={styles.reportTextContainer}>
-            {['Town', 'County', 'Country', 'Email'].map(f => (
+            {['Town','County','Country','Email'].map(f => (
               <Text key={f} style={styles.row} numberOfLines={1} ellipsizeMode="tail">
                 <Text style={styles.label}>{f}: </Text>
                 <Text style={styles.value}>
-                  {item[f.toLowerCase()]?.includes('Error') ? 'N/A' : item[f.toLowerCase()]}
+                  {item[f.toLowerCase()]?.includes('Error')
+                    ? 'N/A'
+                    : item[f.toLowerCase()]}
                 </Text>
               </Text>
             ))}
             {!item.isClean ? (
               <Text style={styles.row}>
                 <Text style={styles.label}>Priority: </Text>
-                <Text style={[styles.value, prioStyle]}>{item.priority.toUpperCase()}</Text>
+                <Text style={[styles.value, prioStyle]}>
+                  {item.priority.toUpperCase()}
+                </Text>
               </Text>
             ) : (
               <Text style={styles.row}>
-               <Text style={[styles.label, styles.priorityClean]}>Status: </Text>
                 <Text style={[styles.label, styles.priorityClean]}>Status: </Text>
+                <Text style={[styles.value, styles.priorityClean]}>Clean</Text>
               </Text>
             )}
             <Text style={styles.row}>
@@ -279,7 +307,7 @@ const Dashboard = ({ navigation }) => {
                 <MapView
                   provider={PROVIDER_GOOGLE}
                   style={styles.reportMap}
-                  region={region}
+                  region={regionObj}
                   scrollEnabled={false}
                   zoomEnabled={false}
                   pitchEnabled={false}
@@ -313,7 +341,7 @@ const Dashboard = ({ navigation }) => {
     );
   };
 
-  // 8) Profile modal
+  // 9) Profile modal
   const renderProfileModal = () => (
     <Modal
       visible={showProfileModal}
@@ -329,11 +357,7 @@ const Dashboard = ({ navigation }) => {
           ) : profilePhotoUri ? (
             <Image source={{ uri: profilePhotoUri }} style={styles.profilePhotoLarge} />
           ) : (
-            <View style={[styles.profilePhotoLarge, styles.avatarPlaceholder]}>
-              <Text style={styles.avatarPlaceholderText}>
-                {userEmail.charAt(0).toUpperCase()}
-              </Text>
-            </View>
+            <Image source={SILHOUETTE} style={styles.profilePhotoLarge} />
           )}
           <Text style={styles.profileEmail}>{userEmail}</Text>
           <TouchableOpacity style={styles.modalButton} onPress={pickOrTakePhoto}>
@@ -362,17 +386,13 @@ const Dashboard = ({ navigation }) => {
     </Modal>
   );
 
-  // 9) Main render
+  // 10) Main render
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1E1E1E" />
+
+      {/* Navbar without back arrow */}
       <View style={styles.navbar}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-        >
-          <Text style={styles.backButtonText}>←</Text>
-        </TouchableOpacity>
         <Text style={styles.navbarTitle}>Dashboard</Text>
         <TouchableOpacity
           style={styles.avatarContainer}
@@ -381,11 +401,7 @@ const Dashboard = ({ navigation }) => {
           {profilePhotoUri ? (
             <Image source={{ uri: profilePhotoUri }} style={styles.avatar} />
           ) : (
-            <View style={[styles.avatar, styles.avatarPlaceholder]}>
-              <Text style={styles.avatarPlaceholderText}>
-                {userEmail.charAt(0).toUpperCase()}
-              </Text>
-            </View>
+            <Image source={SILHOUETTE} style={styles.avatar} />
           )}
         </TouchableOpacity>
       </View>
@@ -425,7 +441,7 @@ const Dashboard = ({ navigation }) => {
         })}
       </View>
 
-      {/* List or Loader */}
+      {/* Report list or loader */}
       <View style={styles.listArea}>
         {loading && !reports.length ? (
           <ActivityIndicator style={styles.loader} size="large" color="#1E90FF" />
@@ -473,9 +489,8 @@ const Dashboard = ({ navigation }) => {
         </View>
       )}
 
-      {/* Bottom Buttons */}
+      {/* Bottom buttons */}
       <View style={styles.bottomButtonContainer}>
-        {/* Leaderboard */}
         <TouchableOpacity
           style={[styles.reportButton, styles.leaderboardButton]}
           onPress={() => navigation.navigate('Leaderboard')}
@@ -484,17 +499,19 @@ const Dashboard = ({ navigation }) => {
             👑 Leaderboard
           </Text>
         </TouchableOpacity>
-
-        {/* Report Litter Now */}
         <TouchableOpacity
           style={styles.reportButton}
           onPress={() => navigation.navigate('Map')}
         >
-          <Text style={styles.reportButtonText}>Report Litter Now</Text>
+          <Text style={styles.reportButtonText}>Report Litter!</Text>
         </TouchableOpacity>
       </View>
 
+      {/* Profile modal */}
       {renderProfileModal()}
+
+      {/* Toast message container */}
+      <Toast />
     </View>
   );
 };
