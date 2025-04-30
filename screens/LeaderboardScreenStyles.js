@@ -1,4 +1,3 @@
-// screens/LeaderboardScreenStyles.js
 
 import { StyleSheet } from 'react-native';
 
