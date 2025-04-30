@@ -892,7 +892,7 @@ function haversineDistance(coords1, coords2) {
 
       const extension = photoEvidence.fileName?.split('.').pop()?.toLowerCase() || 'jpg';
       const fileType = blob.type && blob.type.startsWith('image/') ? blob.type : (photoEvidence.type || 'image/jpeg');
-      const filename = `reports/${selectedReport._id}_${Date.now()}.${extension}`;
+      const filename = `${selectedReport._id}_${Date.now()}.${extension}`;
       console.log(`Prepared filename: ${filename}, type: ${fileType}`);
 
 

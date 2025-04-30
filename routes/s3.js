@@ -1,71 +1,53 @@
-// routes/s3.js
-require('dotenv').config();           // load .env when running locally
 const express = require('express');
-const {
-  S3Client,
-  PutObjectCommand,
-} = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const router = express.Router();
 
-/* ─────────────────────────  AWS CONFIG  ───────────────────────── */
-
-const {
-  AWS_REGION        = 'eu-west-1',
-  AWS_ACCESS_KEY_ID,
-  AWS_SECRET_ACCESS_KEY,
-  S3_BUCKET_NAME    = 'litterwarden',
-} = process.env;
-
-if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
-  console.warn(
-    '[routes/s3] AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY are missing – presign route will fail'
-  );
-}
-
+// ─── Use your live ENV vars ───────────────────────────────────────────────────
 const s3 = new S3Client({
-  region: AWS_REGION,
+  region: process.env.AWS_REGION || 'eu-west-1',
   credentials: {
-    accessKeyId:     AWS_ACCESS_KEY_ID,
-    secretAccessKey: AWS_SECRET_ACCESS_KEY,
-  },
+    accessKeyId:     process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  }
 });
-
-/* ─────────────────────────  ROUTE  ───────────────────────── */
+// ───────────────────────────────────────────────────────────────────────────────
 
 router.get('/presign', async (req, res) => {
   const { filename, type, folder = 'reports' } = req.query;
-
-  /* basic validation */
   if (!filename || !type) {
+    console.warn('Presign request missing filename or type:', req.query);
     return res.status(400).json({ error: 'Missing filename or type' });
   }
-  if (!['reports', 'profile-photos'].includes(folder)) {
-    return res.status(400).json({
-      error: 'Invalid folder (must be "reports" or "profile-photos")',
-    });
+
+  const BUCKET = process.env.S3_BUCKET_NAME || 'litterwarden';
+  if (!BUCKET) {
+    console.error('S3_BUCKET_NAME is not defined');
+    return res.status(500).json({ error: 'Bucket name missing' });
+  }
+
+  if (!['reports','profile-photos'].includes(folder)) {
+    console.warn('Invalid folder in presign request:', folder);
+    return res.status(400).json({ error: 'Invalid folder' });
   }
 
   const key = `${folder}/${filename}`;
+  console.log(`➡️ Generating presign for Bucket=${BUCKET}, Key=${key}, ContentType=${type}`);
 
   try {
     const cmd = new PutObjectCommand({
-      Bucket:      S3_BUCKET_NAME,
+      Bucket:      BUCKET,
       Key:         key,
-      ContentType: type,
+      ContentType: type
     });
 
-    // Presigned URL valid for 60 seconds
     const url = await getSignedUrl(s3, cmd, { expiresIn: 60 });
-
-    console.log(`[routes/s3] Generated presign for ${key}`);
+    console.log('✅ Presigned URL generated:', url);
     return res.json({ url, key });
   } catch (err) {
-    console.error('[routes/s3] Presign error:', err);
-    return res
-      .status(500)
-      .json({ error: 'Failed to generate URL', details: err.message });
+    console.error('🔥 Presign error:', err);
+    return res.status(500).json({ error: err.message });
   }
 });
 
